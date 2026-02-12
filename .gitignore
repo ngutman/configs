@@ -22,3 +22,7 @@ kubeconfig*
 .DS_Store
 .vscode/
 .idea/
+
+# pi auth/cache (do not publish)
+**/auth.json
+pi/**/cache/

@@ -1,0 +1,11 @@
+{
+  "lastChangelogVersion": "0.52.9",
+  "defaultProvider": "openai-codex",
+  "defaultModel": "gpt-5.3-codex",
+  "defaultThinkingLevel": "high",
+  "packages": [
+    "../../workspace/agent-stuff",
+    "npm:@marckrenn/pi-sub-core",
+    "npm:@marckrenn/pi-sub-bar"
+  ]
+}
