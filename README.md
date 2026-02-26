@@ -4,6 +4,7 @@ Personal dotfiles/configs I can share publicly.
 
 ## Structure
 
+- `zsh/.zshrc` — public/shareable zsh config (loads optional local `~/.zshrc.work`)
 - `tmux/.tmux.conf.local` — my tmux customizations (with pane-bottom git/path)
 - `ghostty/config` — Ghostty terminal configuration
 - `pi/agent/settings.json` — pi agent general settings (no auth)
@@ -13,6 +14,11 @@ Personal dotfiles/configs I can share publicly.
 ## Local symlinks
 
 ```bash
+# zsh
+ln -sfn ~/workspace/configs/zsh/.zshrc ~/.zshrc
+# keep private/work-only settings local and untracked:
+# ~/.zshrc.work
+
 # tmux (using gpakosz base config)
 git clone https://github.com/gpakosz/.tmux.git ~/.tmux
 ln -sfn ~/.tmux/.tmux.conf ~/.tmux.conf
