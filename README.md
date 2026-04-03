@@ -5,7 +5,9 @@ Personal dotfiles/configs I can share publicly.
 ## Structure
 
 - `zsh/.zshrc` — public/shareable zsh config (loads optional local `~/.zshrc.work`)
-- `tmux/.tmux.conf.local` — my tmux customizations (with pane-bottom git/path)
+- `tmux/.tmux.conf.local` — my tmux customizations (performance-tuned status line, pane labels, mouse + copy-mode tweaks)
+- `tmux/README.md` — tmux features and setup notes
+- `tmux/scripts/` — helper scripts used by the tmux status line
 - `ghostty/config` — Ghostty terminal configuration
 - `pi/agent/settings.json` — pi agent general settings (no auth)
 - `pi/agent/pi-sub-core-settings.json` — pi-sub-core settings
@@ -23,6 +25,9 @@ ln -sfn ~/workspace/configs/zsh/.zshrc ~/.zshrc
 git clone https://github.com/gpakosz/.tmux.git ~/.tmux
 ln -sfn ~/.tmux/.tmux.conf ~/.tmux.conf
 ln -sfn ~/workspace/configs/tmux/.tmux.conf.local ~/.tmux.conf.local
+mkdir -p ~/.tmux/scripts
+ln -sfn ~/workspace/configs/tmux/scripts/tmux-battery-cache.sh ~/.tmux/scripts/tmux-battery-cache.sh
+ln -sfn ~/workspace/configs/tmux/scripts/tmux-apply-fast-status.sh ~/.tmux/scripts/tmux-apply-fast-status.sh
 
 # ghostty
 mkdir -p ~/.config/ghostty

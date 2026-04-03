@@ -240,7 +240,7 @@ tmux_conf_theme_right_separator_sub="|"
 #     - #{username}
 #     - #{username_ssh}
 tmux_conf_theme_status_left=" ❐ #S | ↑#{?uptime_y, #{uptime_y}y,}#{?uptime_d, #{uptime_d}d,}#{?uptime_h, #{uptime_h}h,}#{?uptime_m, #{uptime_m}m,} "
-tmux_conf_theme_status_right=" #{prefix}#{mouse}#{pairing}#{synchronized}#{?battery_status,#{battery_status},}#{?battery_bar, #{battery_bar},}#{?battery_percentage, #{battery_percentage},} , %R , %d %b | #{username}#{root} | #{hostname} "
+tmux_conf_theme_status_right=" #{prefix}#{mouse}#{pairing}#{synchronized}#{?@battery_status,#{@battery_status},}#{?@battery_bar, #{@battery_bar},}#{?@battery_percentage, #{@battery_percentage},} | %R | %d %b | #{user} | #h "
 
 # status left style
 tmux_conf_theme_status_left_fg="$tmux_conf_theme_colour_6,$tmux_conf_theme_colour_7,$tmux_conf_theme_colour_8"
@@ -437,10 +437,18 @@ tmux_conf_uninstall_plugins_on_reload=true
 set -g pane-border-lines double
 set -g pane-active-border-style "fg=colour51,bg=default,bold"
 
-# Show per-pane info at pane bottom: pane number + folder + git branch
-set -g status-interval 5
+# Show per-pane info at pane bottom without running git on every redraw.
+set -g status-interval 15
 set-window-option -g pane-border-status bottom
-set-window-option -g pane-border-format '#[fg=colour51,bold]P#{pane_index} #[fg=colour223]#{b:pane_current_path} #[fg=colour40]#(git -C "#{pane_current_path}" symbolic-ref --quiet --short HEAD 2>/dev/null || git -C "#{pane_current_path}" rev-parse --short HEAD 2>/dev/null)#[default]'
+set-window-option -g pane-border-format '#[fg=colour51,bold]P#{pane_index} #[fg=colour223]#{b:pane_current_path}#[default]'
+
+# Refresh battery state in a separate background loop and expose cached values
+# via @battery_* variables for the status line.
+run-shell -b '~/.tmux/scripts/tmux-battery-cache.sh'
+
+# Override the generated right status after the theme applies so it uses only
+# tmux-native formats plus the cached @battery_* variables.
+run-shell -b '~/.tmux/scripts/tmux-apply-fast-status.sh'
 
 bind -n WheelUpPane if-shell -F -t = "#{mouse_any_flag}" "send-keys -M" "if -Ft= '#{pane_in_mode}' 'send-keys -M' 'select-pane -t=; copy-mode -e; send-keys -M'"
 bind -n WheelDownPane select-pane -t= \; send-keys -M
