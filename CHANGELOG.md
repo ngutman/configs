@@ -9,7 +9,7 @@ All notable shareable config changes in this repo are tracked here.
   - `tmux/agent-layout.conf`
   - `tmux/scripts/agent-layout`
   - `tmux/scripts/agent-sidebar.py`
-- tmux key bindings for compact/wide mode, agent cycling, sidebar focus, and compact-aware pane creation / killing
+- tmux key bindings for compact/wide mode, agent cycling, sidebar focus, compact-aware pane creation / killing, and prefix `Up` / `Down` agent navigation
 - cached per-pane git branch display in tmux pane borders
 - Pi packages for `pi-web-access` and `pi-subagents`
 - Pi shell command prefix that loads `~/.path_config` and activates the default `nvm` Node version

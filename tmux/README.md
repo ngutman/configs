@@ -106,6 +106,7 @@ ln -sfn ~/workspace/configs/tmux/agent-layout.conf ~/.tmux/agent-layout.conf
 - `prefix a` — focus the sidebar pane
 - `prefix x` — kill the current managed pane using the custom compact-aware kill flow
 - `prefix ]` / `prefix [` — next / previous agent
+- `prefix Down` / `prefix Up` — next / previous agent
 - `prefix Tab` — toggle last active agent
 
 ### Commands
