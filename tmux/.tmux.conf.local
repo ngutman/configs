@@ -364,6 +364,8 @@ bind-key -T copy-mode-vi C-a send-keys -X previous-word
 # move status line to top
 #set -g status-position top
 
+# multi-agent compact sidebar layout
+if-shell '[ -f ~/.tmux/agent-layout.conf ]' 'source-file ~/.tmux/agent-layout.conf'
 
 # -- tpm -----------------------------------------------------------------------
 
@@ -437,10 +439,10 @@ tmux_conf_uninstall_plugins_on_reload=true
 set -g pane-border-lines double
 set -g pane-active-border-style "fg=colour51,bg=default,bold"
 
-# Show per-pane info at pane bottom without running git on every redraw.
+# Show per-pane info at pane bottom using a branch name cached by the shell.
 set -g status-interval 15
 set-window-option -g pane-border-status bottom
-set-window-option -g pane-border-format '#[fg=colour51,bold]P#{pane_index} #[fg=colour223]#{b:pane_current_path}#[default]'
+set-window-option -g pane-border-format '#[fg=colour51,bold]P#{pane_index} #[fg=colour223]#{b:pane_current_path}#{?@git_branch, #[fg=#ffff00]#{@git_branch},}#[default]'
 
 # Refresh battery state in a separate background loop and expose cached values
 # via @battery_* variables for the status line.

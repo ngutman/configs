@@ -23,6 +23,10 @@ kubeconfig*
 .vscode/
 .idea/
 
+# Python build/runtime noise
+__pycache__/
+*.py[cod]
+
 # pi auth/cache (do not publish)
 **/auth.json
 pi/**/cache/

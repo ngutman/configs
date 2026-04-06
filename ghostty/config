@@ -17,6 +17,9 @@ scrollback-limit = 100000000
 # Shell integration
 shell-integration = detect
 
+# Treat macOS Option as Alt/Meta for terminal apps like tmux.
+macos-option-as-alt = true
+
 # Keybinds
 keybind = cmd+left=previous_tab
 keybind = cmd+right=next_tab

@@ -6,12 +6,14 @@ Personal dotfiles/configs I can share publicly.
 
 - `zsh/.zshrc` — public/shareable zsh config (loads optional local `~/.zshrc.work`)
 - `tmux/.tmux.conf.local` — my tmux customizations (performance-tuned status line, pane labels, mouse + copy-mode tweaks)
-- `tmux/README.md` — tmux features and setup notes
-- `tmux/scripts/` — helper scripts used by the tmux status line
+- `tmux/agent-layout.conf` — tmux bindings/options for the compact multi-agent sidebar workflow
+- `tmux/README.md` — tmux features, agent layout usage, and setup notes
+- `tmux/scripts/` — helper scripts for tmux status/battery and the agent sidebar controller/UI
 - `ghostty/config` — Ghostty terminal configuration
 - `pi/agent/settings.json` — pi agent general settings (no auth)
 - `pi/agent/pi-sub-core-settings.json` — pi-sub-core settings
 - `pi/agent/pi-sub-bar-settings.json` — pi-sub-bar display settings
+- `CHANGELOG.md` — notable shareable config changes in this repo
 
 ## Local symlinks
 
@@ -26,8 +28,11 @@ git clone https://github.com/gpakosz/.tmux.git ~/.tmux
 ln -sfn ~/.tmux/.tmux.conf ~/.tmux.conf
 ln -sfn ~/workspace/configs/tmux/.tmux.conf.local ~/.tmux.conf.local
 mkdir -p ~/.tmux/scripts
+ln -sfn ~/workspace/configs/tmux/agent-layout.conf ~/.tmux/agent-layout.conf
 ln -sfn ~/workspace/configs/tmux/scripts/tmux-battery-cache.sh ~/.tmux/scripts/tmux-battery-cache.sh
 ln -sfn ~/workspace/configs/tmux/scripts/tmux-apply-fast-status.sh ~/.tmux/scripts/tmux-apply-fast-status.sh
+ln -sfn ~/workspace/configs/tmux/scripts/agent-layout ~/.tmux/scripts/agent-layout
+ln -sfn ~/workspace/configs/tmux/scripts/agent-sidebar.py ~/.tmux/scripts/agent-sidebar.py
 
 # ghostty
 mkdir -p ~/.config/ghostty

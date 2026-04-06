@@ -45,6 +45,12 @@ if [[ -s "${ZDOTDIR:-$HOME}/.zprezto/init.zsh" ]]; then
 fi
 [[ -n "${ZSH_PROFILE_TIMING+1}" ]] && __zsh_timing "prezto init"
 
+# --- Node.js via nvm ---
+# Prezto loads nvm with --no-use, so explicitly activate the default alias.
+if command -v nvm >/dev/null 2>&1; then
+  nvm use --silent default >/dev/null 2>&1
+fi
+
 # --- Prompt ---
 [[ -f "$HOME/.p10k.zsh" ]] && source "$HOME/.p10k.zsh"
 [[ -n "${ZSH_PROFILE_TIMING+1}" ]] && __zsh_timing "p10k"
@@ -60,26 +66,35 @@ export DISABLE_DEACTIVATE=1
 export EDITOR="vi"
 export VISUAL="vi"
 
-# --- tmux: auto-rename session as <directory>-<branch> ---
+# --- tmux: cache pane git branch and rename session as <directory> ---
 tmux_auto_rename_session() {
   [[ -z "$TMUX" ]] && return
 
-  local dir branch new sid current
+  local dir branch pane_id sid current
   dir="${PWD:t}"
-  branch="$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || echo no-git)"
-  branch="${branch//\//-}"
-  new="${dir} (${branch})"
+  pane_id="${TMUX_PANE:-}"
+
+  if [[ -n "$pane_id" ]]; then
+    branch="$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || true)"
+    if [[ -n "$branch" ]]; then
+      branch="${branch//\//-}"
+      tmux set-option -pt "$pane_id" @git_branch "$branch" 2>/dev/null
+    else
+      tmux set-option -upt "$pane_id" @git_branch 2>/dev/null
+    fi
+  fi
 
   sid="$(tmux display-message -p '#{session_id}' 2>/dev/null)"
   [[ -z "$sid" ]] && return
 
   current="$(tmux display-message -p -t "$sid" '#S' 2>/dev/null)"
-  [[ "$current" == "$new" ]] && return
+  [[ "$current" == "$dir" ]] && return
 
-  tmux rename-session -t "$sid" "$new" 2>/dev/null
+  tmux rename-session -t "$sid" "$dir" 2>/dev/null
 }
 autoload -Uz add-zsh-hook
 add-zsh-hook precmd tmux_auto_rename_session
+add-zsh-hook chpwd tmux_auto_rename_session
 
 # --- Optional private/work config ---
 [[ -f "$HOME/.zshrc.work" ]] && source "$HOME/.zshrc.work"

@@ -1,0 +1,1090 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SIDEBAR_SCRIPT="$SCRIPT_DIR/agent-sidebar.py"
+
+DEFAULT_AGENT_ORDER="orch plan impl review docs"
+DEFAULT_SIDEBAR_WIDTH="24"
+DEFAULT_COMPACT_WINDOW_NAME="__agents_compact"
+DEFAULT_POOL_WINDOW_NAME="__agent_pool"
+DEFAULT_WIDE_WINDOW_NAME="agents"
+
+fail() {
+  local message="agent-layout: $*"
+  echo "$message" >&2
+  if [[ "${AGENT_LAYOUT_NOTIFY:-0}" == "1" ]] && command -v tmux >/dev/null 2>&1; then
+    local target="${AGENT_LAYOUT_PANE:-${TMUX_PANE:-}}"
+    if [[ -n "$target" ]]; then
+      tmux display-message -d 5000 -t "$target" "$message" 2>/dev/null || true
+    else
+      tmux display-message -d 5000 "$message" 2>/dev/null || true
+    fi
+  fi
+  exit 1
+}
+
+tmux_available() {
+  command -v tmux >/dev/null 2>&1
+}
+
+current_session_id() {
+  local target_pane="${AGENT_LAYOUT_PANE:-${TMUX_PANE:-}}"
+  if [[ -n "$target_pane" ]]; then
+    tmux display-message -p -t "$target_pane" '#{session_id}'
+  else
+    tmux display-message -p '#{session_id}'
+  fi
+}
+
+SESSION_ID=""
+
+init_session() {
+  tmux_available || fail "tmux is not installed"
+  if [[ -n "${AGENT_LAYOUT_SESSION:-}" ]]; then
+    SESSION_ID="$AGENT_LAYOUT_SESSION"
+  elif [[ -n "${TMUX:-}" || -n "${TMUX_PANE:-}" || -n "${AGENT_LAYOUT_PANE:-}" ]]; then
+    SESSION_ID="$(current_session_id)"
+  else
+    fail "must be run inside tmux or with AGENT_LAYOUT_SESSION set"
+  fi
+}
+
+get_option() {
+  local name="$1"
+  local value
+  value="$(tmux show-option -qv -t "$SESSION_ID" "$name" 2>/dev/null || true)"
+  if [[ -z "$value" ]]; then
+    value="$(tmux show-option -gqv "$name" 2>/dev/null || true)"
+  fi
+  echo "$value"
+}
+
+set_option() {
+  tmux set-option -q -t "$SESSION_ID" "$1" "$2"
+}
+
+unset_option() {
+  tmux set-option -qu -t "$SESSION_ID" "$1" 2>/dev/null || true
+}
+
+bump_epoch() {
+  local current next
+  current="$(get_option @agent_epoch)"
+  current="${current:-0}"
+  next=$((current + 1))
+  set_option @agent_epoch "$next"
+}
+
+sidebar_width() {
+  local value
+  value="$(get_option @agent_sidebar_width)"
+  echo "${value:-$DEFAULT_SIDEBAR_WIDTH}"
+}
+
+compact_window_name() {
+  local value
+  value="$(get_option @agent_compact_window_name)"
+  echo "${value:-$DEFAULT_COMPACT_WINDOW_NAME}"
+}
+
+pool_window_name() {
+  local value
+  value="$(get_option @agent_pool_window_name)"
+  echo "${value:-$DEFAULT_POOL_WINDOW_NAME}"
+}
+
+wide_window_name_default() {
+  local value
+  value="$(get_option @agent_wide_window_name_default)"
+  echo "${value:-$DEFAULT_WIDE_WINDOW_NAME}"
+}
+
+agent_order_string() {
+  local value
+  value="$(get_option @agent_order)"
+  echo "${value:-$DEFAULT_AGENT_ORDER}"
+}
+
+is_internal_window_name() {
+  local name="$1"
+  [[ "$name" == "$(compact_window_name)" || "$name" == "$(pool_window_name)" ]]
+}
+
+is_internal_pane_title() {
+  local title="$1"
+  [[ "$title" == __agent_* ]]
+}
+
+pane_exists() {
+  local pane_id="$1"
+  tmux list-panes -a -F '#{pane_id}' | grep -Fxq "$pane_id"
+}
+
+window_exists() {
+  local window_id="$1"
+  tmux list-windows -a -F '#{window_id}' | grep -Fxq "$window_id"
+}
+
+pane_is_dead() {
+  local pane_id="$1"
+  [[ "$(tmux display-message -p -t "$pane_id" '#{pane_dead}' 2>/dev/null || echo 1)" == "1" ]]
+}
+
+current_pane_id() {
+  if [[ -n "${AGENT_LAYOUT_PANE:-}" ]]; then
+    echo "$AGENT_LAYOUT_PANE"
+  elif [[ -n "${TMUX_PANE:-}" ]]; then
+    echo "$TMUX_PANE"
+  else
+    tmux display-message -p '#{pane_id}'
+  fi
+}
+
+current_pane_title() {
+  tmux display-message -p -t "$(current_pane_id)" '#{pane_title}'
+}
+
+current_window_name() {
+  tmux display-message -p -t "$(current_pane_id)" '#{window_name}'
+}
+
+window_id_by_name() {
+  local name="$1"
+  tmux list-windows -t "$SESSION_ID" -F '#{window_id}	#{window_name}' | awk -F '\t' -v target="$name" '$2 == target { print $1; exit }'
+}
+
+window_name_by_id() {
+  tmux display-message -p -t "$1" '#{window_name}'
+}
+
+REPAIR_LOCK_DIR=""
+
+repair_lock_dir() {
+  local session_key
+  session_key="${SESSION_ID//[^[:alnum:]]/_}"
+  echo "/tmp/agent-layout-repair-${session_key}.lock"
+}
+
+with_repair_lock() {
+  REPAIR_LOCK_DIR="$(repair_lock_dir)"
+  if mkdir "$REPAIR_LOCK_DIR" 2>/dev/null; then
+    trap 'rmdir "$REPAIR_LOCK_DIR" 2>/dev/null || true' RETURN
+    return 0
+  fi
+  return 1
+}
+
+agent_option_key() {
+  local pane_id="$1"
+  echo "@agent_name_${pane_id#%}"
+}
+
+stored_agent_label() {
+  local pane_id="$1"
+  get_option "$(agent_option_key "$pane_id")"
+}
+
+clear_agent_label() {
+  local pane_id="$1"
+  unset_option "$(agent_option_key "$pane_id")"
+}
+
+discover_agents() {
+  local sidebar_pane
+  local -A labels
+  local option_name option_value pane_key display_name
+  sidebar_pane="$(get_option @agent_sidebar_pane)"
+
+  while IFS=$'\t' read -r option_name option_value; do
+    [[ -n "$option_name" ]] || continue
+    option_value="${option_value#\"}"
+    option_value="${option_value%\"}"
+    pane_key="%${option_name#@agent_name_}"
+    labels["$pane_key"]="$option_value"
+  done < <(
+    tmux show-options -t "$SESSION_ID" 2>/dev/null |
+      awk '/^@agent_name_/ { key=$1; $1=""; sub(/^ /, ""); print key "\t" $0 }'
+  )
+
+  tmux list-panes -a -F '#{session_id}	#{window_id}	#{window_name}	#{pane_id}	#{pane_dead}	#{pane_title}' |
+    awk -F '\t' -v session="$SESSION_ID" '$1 == session { print $2 "\t" $3 "\t" $4 "\t" $5 "\t" $6 }' |
+    while IFS=$'\t' read -r window_id window_name pane_id pane_dead pane_title; do
+      [[ "$pane_dead" == "1" ]] && continue
+      display_name="${labels[$pane_id]:-$pane_title}"
+      [[ -n "$display_name" ]] || continue
+      [[ "$pane_id" == "$sidebar_pane" ]] && continue
+      is_internal_pane_title "$display_name" && continue
+      printf '%s\t%s\t%s\t%s\n' "$display_name" "$pane_id" "$window_id" "$window_name"
+    done
+}
+
+ordered_agent_names() {
+  local -a discovered ordered extras
+  local -A seen discovered_map
+  local name
+  discovered=()
+  ordered=()
+  extras=()
+  seen=()
+  discovered_map=()
+
+  mapfile -t discovered < <(discover_agents | cut -f1)
+  for name in "${discovered[@]}"; do
+    [[ -n "$name" ]] || continue
+    discovered_map["$name"]=1
+  done
+
+  for name in $(agent_order_string); do
+    if [[ -n "${discovered_map[$name]:-}" ]]; then
+      ordered+=("$name")
+      seen["$name"]=1
+    fi
+  done
+
+  for name in "${discovered[@]}"; do
+    [[ -n "$name" ]] || continue
+    if [[ -z "${seen[$name]:-}" ]]; then
+      extras+=("$name")
+      seen["$name"]=1
+    fi
+  done
+
+  if ((${#extras[@]} > 0)); then
+    mapfile -t extras < <(printf '%s\n' "${extras[@]}" | sort)
+    ordered+=("${extras[@]}")
+  fi
+
+  if ((${#ordered[@]} > 0)); then
+    printf '%s\n' "${ordered[@]}"
+  fi
+}
+
+agent_pane_by_name() {
+  local target="$1"
+  local matches=()
+  local line title pane_id _rest
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    IFS=$'\t' read -r title pane_id _rest <<<"$line"
+    if [[ "$title" == "$target" ]]; then
+      matches+=("$pane_id")
+    fi
+  done < <(discover_agents)
+
+  if ((${#matches[@]} == 0)); then
+    return 1
+  fi
+
+  if ((${#matches[@]} > 1)); then
+    fail "multiple panes found for agent '$target'"
+  fi
+
+  echo "${matches[0]}"
+}
+
+ordered_agent_lines() {
+  local -a lines ordered extras
+  local -A by_name
+  local line name
+  lines=()
+  ordered=()
+  extras=()
+  by_name=()
+
+  mapfile -t lines < <(discover_agents)
+  for line in "${lines[@]}"; do
+    [[ -n "$line" ]] || continue
+    name="${line%%$'\t'*}"
+    by_name["$name"]="$line"
+  done
+
+  for name in $(agent_order_string); do
+    if [[ -n "${by_name[$name]:-}" ]]; then
+      ordered+=("${by_name[$name]}")
+      unset 'by_name[$name]'
+    fi
+  done
+
+  if ((${#by_name[@]} > 0)); then
+    while IFS= read -r name; do
+      [[ -n "$name" ]] || continue
+      extras+=("${by_name[$name]}")
+    done < <(printf '%s\n' "${!by_name[@]}" | sort)
+  fi
+
+  if ((${#ordered[@]} > 0)); then
+    printf '%s\n' "${ordered[@]}"
+  fi
+  if ((${#extras[@]} > 0)); then
+    printf '%s\n' "${extras[@]}"
+  fi
+}
+
+first_agent_name() {
+  ordered_agent_names | head -n1
+}
+
+remember_agent_label() {
+  local pane_id="$1"
+  local label="$2"
+  [[ -n "$pane_id" && -n "$label" ]] || return 0
+  set_option "$(agent_option_key "$pane_id")" "$label"
+}
+
+current_agent_name() {
+  local pane_id pane_name pane_title
+  pane_id="$(current_pane_id)"
+  pane_name="$(stored_agent_label "$pane_id")"
+  if [[ -n "$pane_name" ]]; then
+    echo "$pane_name"
+  else
+    pane_title="$(tmux display-message -p -t "$pane_id" '#{pane_title}')"
+    echo "$pane_title"
+  fi
+}
+
+normalize_label_token() {
+  local value="$1"
+  value="${value// /-}"
+  value="${value//$'\t'/-}"
+  value="${value//\//-}"
+  value="${value//:/-}"
+  value="${value//[^[:alnum:]_.@+-]/-}"
+  while [[ "$value" == *--* ]]; do
+    value="${value//--/-}"
+  done
+  value="${value#-}"
+  value="${value%-}"
+  echo "$value"
+}
+
+unique_agent_label() {
+  local base="$1"
+  local candidate="$base"
+  local suffix=2
+  while agent_pane_by_name "$candidate" >/dev/null 2>&1; do
+    candidate="${base}-${suffix}"
+    suffix=$((suffix + 1))
+  done
+  echo "$candidate"
+}
+
+derive_label_for_pane() {
+  local pane_id="$1"
+  local path_base git_branch command label
+  path_base="$(tmux display-message -p -t "$pane_id" '#{b:pane_current_path}')"
+  git_branch="$(tmux display-message -p -t "$pane_id" '#{@git_branch}')"
+  command="$(tmux display-message -p -t "$pane_id" '#{pane_current_command}')"
+
+  path_base="$(normalize_label_token "$path_base")"
+  git_branch="$(normalize_label_token "$git_branch")"
+  command="$(normalize_label_token "$command")"
+
+  if [[ -n "$path_base" && -n "$git_branch" ]]; then
+    label="${path_base}-${git_branch}"
+  elif [[ -n "$path_base" ]]; then
+    label="$path_base"
+  elif [[ -n "$command" ]]; then
+    label="$command"
+  else
+    label="pane"
+  fi
+
+  unique_agent_label "$label"
+}
+
+append_agent_order() {
+  local label="$1"
+  local order
+  order="$(get_option @agent_order)"
+  if [[ -z "$order" ]]; then
+    set_option @agent_order "$label"
+    return
+  fi
+  for existing in $order; do
+    [[ "$existing" == "$label" ]] && return
+  done
+  set_option @agent_order "$order $label"
+}
+
+cleanup_dead_panes() {
+  local line pane_id pane_dead pane_title window_name label compact_window pool_window cleaned=0
+  compact_window="$(compact_window_name)"
+  pool_window="$(pool_window_name)"
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    IFS=$'\t' read -r pane_id pane_dead pane_title window_name <<<"$line"
+    [[ "$pane_dead" == "1" ]] || continue
+    label="$(stored_agent_label "$pane_id")"
+    if [[ -n "$label" || "$pane_title" == __agent_* || "$window_name" == "$compact_window" || "$window_name" == "$pool_window" ]]; then
+      clear_agent_label "$pane_id"
+      tmux kill-pane -t "$pane_id" 2>/dev/null || true
+      cleaned=1
+    fi
+  done < <(
+    tmux list-panes -a -F '#{session_id}	#{pane_id}	#{pane_dead}	#{pane_title}	#{window_name}' |
+      awk -F '\t' -v session="$SESSION_ID" '$1 == session { print $2 "\t" $3 "\t" $4 "\t" $5 }'
+  )
+
+  local focus_pane sidebar_pane
+  focus_pane="$(get_option @agent_focus_pane)"
+  sidebar_pane="$(get_option @agent_sidebar_pane)"
+  if [[ -n "$focus_pane" ]] && ! pane_exists "$focus_pane"; then
+    unset_option @agent_focus_pane
+  fi
+  if [[ -n "$sidebar_pane" ]] && ! pane_exists "$sidebar_pane"; then
+    unset_option @agent_sidebar_pane
+  fi
+
+  if [[ "$cleaned" == "1" ]]; then
+    bump_epoch
+  fi
+}
+
+kill_internal_windows() {
+  local keep_compact="$1"
+  local keep_pool="$2"
+  local line window_id window_name
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    IFS=$'\t' read -r window_id window_name <<<"$line"
+    if [[ "$window_name" == "$(compact_window_name)" ]]; then
+      [[ -n "$keep_compact" && "$window_id" == "$keep_compact" ]] && continue
+      tmux kill-window -t "$window_id" 2>/dev/null || true
+    elif [[ "$window_name" == "$(pool_window_name)" ]]; then
+      [[ -n "$keep_pool" && "$window_id" == "$keep_pool" ]] && continue
+      tmux kill-window -t "$window_id" 2>/dev/null || true
+    fi
+  done < <(tmux list-windows -t "$SESSION_ID" -F '#{window_id}	#{window_name}')
+}
+
+assert_no_internal_windows() {
+  local name window_id
+  for name in "$(compact_window_name)" "$(pool_window_name)"; do
+    window_id="$(window_id_by_name "$name")"
+    if [[ -n "$window_id" ]]; then
+      fail "internal window '$name' already exists in session; run cleanup-dead or wide before compacting again"
+    fi
+  done
+}
+
+sidebar_command() {
+  local log_file="$HOME/.tmux/agent-sidebar.log"
+  printf "python3 %q --session %q --controller %q 2>> %q" "$SIDEBAR_SCRIPT" "$SESSION_ID" "$SCRIPT_DIR/agent-layout" "$log_file"
+}
+
+create_sidebar_pane() {
+  local target_pane="$1"
+  local width="$2"
+  local compact_window="$3"
+  local sidebar_pane
+
+  tmux set-option -w -t "$compact_window" remain-on-exit off >/dev/null 2>&1 || true
+  sidebar_pane="$(tmux split-window -d -h -b -l "$width" -t "$target_pane" -P -F '#{pane_id}')"
+  tmux select-pane -t "$sidebar_pane" -T '__agent_nav'
+  echo "$sidebar_pane"
+}
+
+start_sidebar() {
+  local sidebar_pane="$1"
+  local compact_window="$2"
+  : > "$HOME/.tmux/agent-sidebar.log"
+  tmux set-option -w -t "$compact_window" remain-on-exit off >/dev/null 2>&1 || true
+  tmux select-window -t "$compact_window"
+  tmux respawn-pane -k -t "$sidebar_pane" "$(sidebar_command)"
+}
+
+ensure_sidebar() {
+  local compact_window focus_pane sidebar_pane width
+  compact_window="$(get_option @agent_compact_window)"
+  focus_pane="$(get_option @agent_focus_pane)"
+  sidebar_pane="$(get_option @agent_sidebar_pane)"
+
+  [[ -n "$compact_window" ]] || fail "compact window is missing"
+  window_exists "$compact_window" || fail "compact window no longer exists"
+  [[ -n "$focus_pane" ]] || fail "focus pane is missing"
+  pane_exists "$focus_pane" || fail "focus pane no longer exists"
+
+  if [[ -n "$sidebar_pane" ]] && pane_exists "$sidebar_pane"; then
+    if pane_is_dead "$sidebar_pane"; then
+      start_sidebar "$sidebar_pane" "$compact_window"
+    fi
+    return 0
+  fi
+
+  width="$(sidebar_width)"
+  sidebar_pane="$(create_sidebar_pane "$focus_pane" "$width" "$compact_window")"
+  set_option @agent_sidebar_pane "$sidebar_pane"
+  start_sidebar "$sidebar_pane" "$compact_window"
+  bump_epoch
+}
+
+choose_active_name_for_compact() {
+  local current_name chosen
+  current_name="$(current_agent_name)"
+  if [[ -n "$current_name" ]] && agent_pane_by_name "$current_name" >/dev/null 2>&1; then
+    echo "$current_name"
+    return
+  fi
+
+  chosen="$(get_option @agent_active_name)"
+  if [[ -n "$chosen" ]] && agent_pane_by_name "$chosen" >/dev/null 2>&1; then
+    echo "$chosen"
+    return
+  fi
+
+  chosen="$(first_agent_name)"
+  [[ -n "$chosen" ]] || fail "no agent panes found"
+  echo "$chosen"
+}
+
+cmd_compact() {
+  local mode compact_name pool_name wide_name width compact_window pool_window sidebar_pane
+  local focus_placeholder pool_placeholder active_name active_pane current_window
+  local -a agent_lines
+  local title pane_id _window_id _window_name
+
+  cleanup_dead_panes
+  mode="$(get_option @agent_mode)"
+  if [[ "$mode" == 'compact' ]]; then
+    compact_window="$(get_option @agent_compact_window)"
+    if [[ -z "$compact_window" ]] || ! window_exists "$compact_window"; then
+      cmd_wide >/dev/null
+      mode="wide"
+    else
+      cmd_refresh >/dev/null
+      ensure_sidebar
+      tmux select-window -t "$compact_window"
+      tmux select-pane -t "$(get_option @agent_focus_pane)"
+      return
+    fi
+  fi
+
+  mapfile -t agent_lines < <(discover_agents)
+  ((${#agent_lines[@]} > 0)) || fail "no titled agent panes found in session $SESSION_ID"
+
+  current_window="$(current_window_name)"
+  if is_internal_window_name "$current_window"; then
+    wide_name="$(wide_window_name_default)"
+  else
+    wide_name="$current_window"
+  fi
+
+  assert_no_internal_windows
+
+  compact_name="$(compact_window_name)"
+  pool_name="$(pool_window_name)"
+  width="$(sidebar_width)"
+  active_name="$(choose_active_name_for_compact)"
+  active_pane="$(agent_pane_by_name "$active_name")"
+
+  compact_window="$(tmux new-window -d -P -F '#{window_id}' -t "$SESSION_ID" -n "$compact_name")"
+  focus_placeholder="$(tmux list-panes -t "$compact_window" -F '#{pane_id}')"
+  tmux select-pane -t "$focus_placeholder" -T '__agent_focus_placeholder'
+  sidebar_pane="$(create_sidebar_pane "$focus_placeholder" "$width" "$compact_window")"
+
+  pool_window="$(tmux new-window -d -P -F '#{window_id}' -t "$SESSION_ID" -n "$pool_name")"
+  pool_placeholder="$(tmux list-panes -t "$pool_window" -F '#{pane_id}')"
+  tmux select-pane -t "$pool_placeholder" -T '__agent_pool_placeholder'
+
+  tmux swap-pane -d -s "$active_pane" -t "$focus_placeholder"
+  tmux kill-pane -t "$focus_placeholder"
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    IFS=$'\t' read -r title pane_id _window_id _window_name <<<"$line"
+    remember_agent_label "$pane_id" "$title"
+    [[ "$title" == "$active_name" ]] && continue
+    tmux join-pane -d -s "$pane_id" -t "$pool_window"
+  done < <(printf '%s\n' "${agent_lines[@]}")
+
+  remember_agent_label "$active_pane" "$active_name"
+
+  set_option @agent_mode compact
+  set_option @agent_compact_window "$compact_window"
+  set_option @agent_pool_window "$pool_window"
+  set_option @agent_sidebar_pane "$sidebar_pane"
+  set_option @agent_focus_pane "$active_pane"
+  set_option @agent_active_name "$active_name"
+  set_option @agent_last_active_name ''
+  set_option @agent_wide_window_name "$wide_name"
+  bump_epoch
+
+  tmux select-window -t "$compact_window"
+  tmux select-pane -t "$active_pane"
+  start_sidebar "$sidebar_pane" "$compact_window"
+  tmux select-window -t "$compact_window"
+  tmux select-pane -t "$active_pane"
+}
+
+cmd_wide() {
+  local mode compact_window pool_window sidebar_pane wide_name active_pane target_window
+  local line title pane_id _window_id window_name
+
+  cleanup_dead_panes
+  mode="$(get_option @agent_mode)"
+  if [[ "$mode" != 'compact' ]]; then
+    tmux select-layout even-horizontal >/dev/null 2>&1 || true
+    set_option @agent_mode wide
+    return
+  fi
+
+  compact_window="$(get_option @agent_compact_window)"
+  pool_window="$(get_option @agent_pool_window)"
+  sidebar_pane="$(get_option @agent_sidebar_pane)"
+  active_pane="$(get_option @agent_focus_pane)"
+  wide_name="$(get_option @agent_wide_window_name)"
+  wide_name="${wide_name:-$(wide_window_name_default)}"
+
+  if [[ -n "$sidebar_pane" ]] && pane_exists "$sidebar_pane"; then
+    tmux kill-pane -t "$sidebar_pane"
+  fi
+
+  if [[ -n "$compact_window" ]] && window_exists "$compact_window"; then
+    target_window="$compact_window"
+    tmux rename-window -t "$target_window" "$wide_name"
+  else
+    target_window="$(window_id_by_name "$wide_name")"
+    if [[ -z "$target_window" ]]; then
+      target_window="$(tmux new-window -d -P -F '#{window_id}' -t "$SESSION_ID" -n "$wide_name")"
+    fi
+  fi
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    IFS=$'\t' read -r title pane_id _window_id window_name <<<"$line"
+    [[ -n "$title" ]] || continue
+    if [[ "$window_name" == "$wide_name" && "$target_window" == "$_window_id" ]]; then
+      continue
+    fi
+    tmux join-pane -d -s "$pane_id" -t "$target_window"
+  done < <(discover_agents)
+
+  if [[ -n "$pool_window" ]] && window_exists "$pool_window"; then
+    tmux kill-window -t "$pool_window"
+  fi
+
+  if [[ -n "$target_window" ]] && window_exists "$target_window"; then
+    tmux select-window -t "$target_window"
+    if [[ -n "$active_pane" ]] && pane_exists "$active_pane"; then
+      tmux select-pane -t "$active_pane"
+    fi
+    tmux select-layout -t "$target_window" even-horizontal >/dev/null 2>&1 || true
+  fi
+
+  set_option @agent_mode wide
+  bump_epoch
+  unset_option @agent_compact_window
+  unset_option @agent_pool_window
+  unset_option @agent_sidebar_pane
+  unset_option @agent_focus_pane
+  unset_option @agent_last_active_name
+  kill_internal_windows '' ''
+}
+
+cmd_focus() {
+  local target="$1"
+  local mode current_active_name current_active_pane target_pane compact_window
+
+  cleanup_dead_panes
+  mode="$(get_option @agent_mode)"
+  [[ "$mode" == 'compact' ]] || fail "focus only works in compact mode"
+
+  current_active_name="$(get_option @agent_active_name)"
+  current_active_pane="$(get_option @agent_focus_pane)"
+  compact_window="$(get_option @agent_compact_window)"
+  target_pane="$(agent_pane_by_name "$target")"
+
+  if [[ "$target" == "$current_active_name" ]]; then
+    tmux select-window -t "$compact_window"
+    tmux select-pane -t "$target_pane"
+    return
+  fi
+
+  [[ -n "$current_active_pane" ]] || fail "missing active focus pane state"
+  pane_exists "$current_active_pane" || fail "active focus pane is gone"
+
+  tmux swap-pane -d -s "$target_pane" -t "$current_active_pane"
+
+  set_option @agent_last_active_name "$current_active_name"
+  set_option @agent_active_name "$target"
+  set_option @agent_focus_pane "$target_pane"
+  bump_epoch
+
+  tmux select-window -t "$compact_window"
+  tmux select-pane -t "$target_pane"
+}
+
+cmd_next_prev() {
+  local direction="$1"
+  local active_name current_index names_count next_index
+  local -a names
+
+  mapfile -t names < <(ordered_agent_names)
+  names_count="${#names[@]}"
+  ((names_count > 0)) || fail "no agents found"
+
+  active_name="$(get_option @agent_active_name)"
+  current_index=0
+  for i in "${!names[@]}"; do
+    if [[ "${names[$i]}" == "$active_name" ]]; then
+      current_index="$i"
+      break
+    fi
+  done
+
+  if [[ "$direction" == 'next' ]]; then
+    next_index=$(((current_index + 1) % names_count))
+  else
+    next_index=$(((current_index - 1 + names_count) % names_count))
+  fi
+
+  cmd_focus "${names[$next_index]}"
+}
+
+cmd_toggle_last() {
+  local last_active
+  last_active="$(get_option @agent_last_active_name)"
+  [[ -n "$last_active" ]] || fail "no previous agent recorded"
+  cmd_focus "$last_active"
+}
+
+cmd_focus_sidebar() {
+  local sidebar_pane compact_window
+  sidebar_pane="$(get_option @agent_sidebar_pane)"
+  compact_window="$(get_option @agent_compact_window)"
+  [[ -n "$sidebar_pane" ]] || fail "sidebar pane is not available"
+  ensure_sidebar
+  tmux select-window -t "$compact_window"
+  tmux select-pane -t "$sidebar_pane"
+}
+
+cmd_focus_right() {
+  local compact_window focus_pane
+  compact_window="$(get_option @agent_compact_window)"
+  focus_pane="$(get_option @agent_focus_pane)"
+  [[ -n "$focus_pane" ]] || fail "focus pane is not available"
+  tmux select-window -t "$compact_window"
+  tmux select-pane -t "$focus_pane"
+}
+
+cmd_repair() {
+  local mode compact_window focus_pane first_name first_pane
+  with_repair_lock || return 0
+  cleanup_dead_panes
+  mode="$(get_option @agent_mode)"
+  [[ "$mode" == 'compact' ]] || return 0
+
+  compact_window="$(get_option @agent_compact_window)"
+  focus_pane="$(get_option @agent_focus_pane)"
+
+  if [[ -n "$compact_window" ]] && window_exists "$compact_window" && [[ -n "$focus_pane" ]] && pane_exists "$focus_pane"; then
+    ensure_sidebar
+    refresh_active_state >/dev/null 2>&1 || true
+    return 0
+  fi
+
+  first_name="$(first_agent_name)"
+  if [[ -z "$first_name" ]]; then
+    set_option @agent_mode wide
+    unset_option @agent_compact_window
+    unset_option @agent_pool_window
+    unset_option @agent_sidebar_pane
+    unset_option @agent_focus_pane
+    bump_epoch
+    kill_internal_windows '' ''
+    return 0
+  fi
+
+  first_pane="$(agent_pane_by_name "$first_name")"
+  kill_internal_windows '' ''
+  set_option @agent_mode wide
+  unset_option @agent_compact_window
+  unset_option @agent_pool_window
+  unset_option @agent_sidebar_pane
+  unset_option @agent_focus_pane
+  AGENT_LAYOUT_PANE="$first_pane" cmd_compact
+}
+
+cmd_kill_current() {
+  local target_pane mode sidebar_pane focus_pane label next_name next_pane
+  mode="$(get_option @agent_mode)"
+  target_pane="$(current_pane_id)"
+
+  if [[ "$mode" == 'compact' ]]; then
+    sidebar_pane="$(get_option @agent_sidebar_pane)"
+    focus_pane="$(get_option @agent_focus_pane)"
+    if [[ -n "$sidebar_pane" && "$target_pane" == "$sidebar_pane" ]]; then
+      target_pane="$focus_pane"
+    fi
+
+    if [[ -n "$focus_pane" && "$target_pane" == "$focus_pane" ]]; then
+      label="$(stored_agent_label "$target_pane")"
+      next_name="$(ordered_agent_names | grep -Fxv "$label" | head -n1 || true)"
+      if [[ -n "$next_name" ]]; then
+        cmd_focus "$next_name"
+      else
+        cmd_wide >/dev/null 2>&1 || true
+      fi
+    fi
+  fi
+
+  [[ -n "$target_pane" ]] || fail "no pane selected to kill"
+  pane_exists "$target_pane" || fail "target pane no longer exists"
+  label="$(stored_agent_label "$target_pane")"
+  tmux kill-pane -t "$target_pane"
+  if [[ -n "$label" ]]; then
+    clear_agent_label "$target_pane"
+  fi
+  cleanup_dead_panes
+  refresh_active_state >/dev/null 2>&1 || true
+  if [[ "$mode" == 'compact' ]]; then
+    cmd_repair
+  fi
+}
+
+cmd_new() {
+  local mode source_pane source_path pool_window compact_window target_for_split new_pane label
+  local sidebar_pane focus_pane
+
+  cleanup_dead_panes
+  mode="$(get_option @agent_mode)"
+  source_pane="$(current_pane_id)"
+  sidebar_pane="$(get_option @agent_sidebar_pane)"
+  focus_pane="$(get_option @agent_focus_pane)"
+
+  if [[ -n "$sidebar_pane" && "$source_pane" == "$sidebar_pane" && -n "$focus_pane" ]]; then
+    source_pane="$focus_pane"
+  fi
+
+  pane_exists "$source_pane" || fail "source pane is not available"
+  source_path="$(tmux display-message -p -t "$source_pane" '#{pane_current_path}')"
+
+  if [[ "$mode" == 'compact' ]]; then
+    pool_window="$(get_option @agent_pool_window)"
+    compact_window="$(get_option @agent_compact_window)"
+    [[ -n "$pool_window" ]] || fail "pool window is not available"
+    target_for_split="$(tmux list-panes -t "$pool_window" -F '#{pane_id}' | head -n1)"
+    [[ -n "$target_for_split" ]] || fail "pool window has no target pane"
+    new_pane="$(tmux split-window -d -h -t "$target_for_split" -c "$source_path" -P -F '#{pane_id}')"
+    label="$(derive_label_for_pane "$new_pane")"
+    remember_agent_label "$new_pane" "$label"
+    append_agent_order "$label"
+    bump_epoch
+    cmd_focus "$label"
+    tmux select-window -t "$compact_window"
+    tmux select-pane -t "$(get_option @agent_focus_pane)"
+  else
+    new_pane="$(tmux split-window -h -t "$source_pane" -c "$source_path" -P -F '#{pane_id}')"
+    label="$(derive_label_for_pane "$new_pane")"
+    remember_agent_label "$new_pane" "$label"
+    append_agent_order "$label"
+    tmux select-layout even-horizontal >/dev/null 2>&1 || true
+    bump_epoch
+    tmux select-pane -t "$new_pane"
+  fi
+
+  echo "$label"
+}
+
+cmd_register() {
+  local pane_id="$1"
+  local label="$2"
+  [[ -n "$pane_id" && -n "$label" ]] || fail "register requires <pane-id> <label>"
+  pane_exists "$pane_id" || fail "pane '$pane_id' does not exist"
+  remember_agent_label "$pane_id" "$label"
+  append_agent_order "$label"
+  bump_epoch
+}
+
+cmd_list_agents() {
+  ordered_agent_lines
+}
+
+refresh_active_state() {
+  local mode active_name active_pane
+  mode="$(get_option @agent_mode)"
+  [[ "$mode" == 'compact' ]] || return 0
+
+  active_name="$(get_option @agent_active_name)"
+  if [[ -z "$active_name" ]] || ! active_pane="$(agent_pane_by_name "$active_name" 2>/dev/null)"; then
+    active_name="$(first_agent_name)"
+    [[ -n "$active_name" ]] || fail "no agents available"
+    active_pane="$(agent_pane_by_name "$active_name")"
+    set_option @agent_active_name "$active_name"
+    bump_epoch
+  fi
+  set_option @agent_focus_pane "$active_pane"
+}
+
+cmd_snapshot() {
+  local sidebar_pane focus_pane active_name last_active_name mode epoch width height line
+  local -A pane_folder pane_branch
+  local pane_id folder branch
+
+  sidebar_pane="$(get_option @agent_sidebar_pane)"
+  focus_pane="$(get_option @agent_focus_pane)"
+  active_name="$(get_option @agent_active_name)"
+  last_active_name="$(get_option @agent_last_active_name)"
+  mode="$(get_option @agent_mode)"
+  epoch="$(get_option @agent_epoch)"
+  epoch="${epoch:-0}"
+  width=0
+  height=0
+
+  while IFS=$'\t' read -r pane_id folder branch; do
+    [[ -n "$pane_id" ]] || continue
+    pane_folder["$pane_id"]="$folder"
+    pane_branch["$pane_id"]="$branch"
+  done < <(
+    tmux list-panes -a -F '#{session_id}	#{pane_id}	#{b:pane_current_path}	#{@git_branch}' |
+      awk -F '\t' -v session="$SESSION_ID" '$1 == session { print $2 "\t" $3 "\t" $4 }'
+  )
+
+  if [[ -n "$sidebar_pane" ]] && pane_exists "$sidebar_pane"; then
+    IFS=$'\t' read -r width height <<<"$(tmux display-message -p -t "$sidebar_pane" '#{pane_width}	#{pane_height}')"
+  fi
+
+  printf 'mode\t%s\n' "$mode"
+  printf 'active_name\t%s\n' "$active_name"
+  printf 'last_active_name\t%s\n' "$last_active_name"
+  printf 'sidebar_pane\t%s\n' "$sidebar_pane"
+  printf 'focus_pane\t%s\n' "$focus_pane"
+  printf 'epoch\t%s\n' "$epoch"
+  printf 'size\t%s\t%s\n' "$width" "$height"
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    IFS=$'\t' read -r _name pane_id _window_id _window_name <<<"$line"
+    printf 'agent\t%s\t%s\t%s\n' "$line" "${pane_folder[$pane_id]:-}" "${pane_branch[$pane_id]:-}"
+  done < <(ordered_agent_lines)
+}
+
+cmd_cleanup_dead() {
+  cleanup_dead_panes
+}
+
+cmd_refresh() {
+  cleanup_dead_panes
+  refresh_active_state
+}
+
+cmd_status() {
+  local line
+  cleanup_dead_panes
+  if [[ "$(get_option @agent_mode)" != 'compact' ]]; then
+    kill_internal_windows '' ''
+  fi
+  echo "session: $SESSION_ID"
+  echo "mode: $(get_option @agent_mode)"
+  echo "compact_window: $(get_option @agent_compact_window)"
+  echo "pool_window: $(get_option @agent_pool_window)"
+  echo "sidebar_pane: $(get_option @agent_sidebar_pane)"
+  echo "focus_pane: $(get_option @agent_focus_pane)"
+  echo "active_name: $(get_option @agent_active_name)"
+  echo "last_active_name: $(get_option @agent_last_active_name)"
+  echo "wide_window_name: $(get_option @agent_wide_window_name)"
+  echo
+  echo "agents:"
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    echo "  $line"
+  done < <(ordered_agent_lines)
+}
+
+usage() {
+  cat <<'EOF'
+usage: agent-layout <command> [args]
+
+commands:
+  compact                 switch to compact sidebar layout
+  wide                    restore all agents into an even-horizontal wide layout
+  new                     create a new managed pane and auto-label it from pane context
+  kill-current            kill the current managed pane and repair compact mode
+  repair                  repair compact mode after pane loss or stale state
+  focus <name>            focus the named agent in compact mode
+  next                    focus the next agent
+  prev                    focus the previous agent
+  toggle-last             jump back to the previously focused agent
+  focus-sidebar           move keyboard focus to the sidebar pane
+  focus-right             move keyboard focus to the active pane
+  register <pane> <name>  assign a stable label to a pane
+  list-agents             print discovered agents
+  snapshot                print a compact sidebar state snapshot
+  cleanup-dead            remove stale dead managed panes
+  refresh                 refresh compact-mode state
+  status                  print current state and discovered agents
+EOF
+}
+
+main() {
+  init_session
+
+  local cmd="${1:-}"
+  case "$cmd" in
+    compact)
+      cmd_compact
+      ;;
+    wide)
+      cmd_wide
+      ;;
+    new)
+      cmd_new
+      ;;
+    kill-current)
+      cmd_kill_current
+      ;;
+    repair)
+      cmd_repair
+      ;;
+    focus)
+      [[ $# -ge 2 ]] || fail "focus requires an agent name"
+      cmd_focus "$2"
+      ;;
+    next)
+      cmd_next_prev next
+      ;;
+    prev)
+      cmd_next_prev prev
+      ;;
+    toggle-last)
+      cmd_toggle_last
+      ;;
+    focus-sidebar)
+      cmd_focus_sidebar
+      ;;
+    focus-right)
+      cmd_focus_right
+      ;;
+    register)
+      [[ $# -ge 3 ]] || fail "register requires <pane-id> <label>"
+      cmd_register "$2" "$3"
+      ;;
+    list-agents)
+      cmd_list_agents
+      ;;
+    snapshot)
+      cmd_snapshot
+      ;;
+    cleanup-dead)
+      cmd_cleanup_dead
+      ;;
+    refresh)
+      cmd_refresh
+      ;;
+    status)
+      cmd_status
+      ;;
+    ''|help|-h|--help)
+      usage
+      ;;
+    *)
+      fail "unknown command '$cmd'"
+      ;;
+  esac
+}
+
+main "$@"
