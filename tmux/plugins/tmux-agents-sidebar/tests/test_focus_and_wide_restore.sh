@@ -19,7 +19,7 @@ store_window_before="$(session_option @agents_sidebar_store_window)"
 compact_window="$(session_option @agents_sidebar_compact_window)"
 
 controller focus two >/dev/null
-status_after_focus="$(controller status)"
+status_after_focus="$(status_output)"
 assert_contains "active_name: two" "$status_after_focus" "focus should switch the active label"
 assert_eq "$pane_two" "$(session_option @agents_sidebar_focus_pane)" "focus pane option should track the newly focused pane"
 assert_eq "$compact_window" "$(pane_window_id "$pane_two")" "focused pane should move into the visible compact window"
@@ -41,8 +41,8 @@ window_one="$(pane_window_id "$pane_one")"
 window_two="$(pane_window_id "$pane_two")"
 assert_eq "$window_one" "$window_two" "wide mode should bring both panes back into the same window"
 
-snapshot_after_wide="$(controller snapshot)"
-assert_contains $'agent\tone\t'"$pane_one" "$snapshot_after_wide" "wide snapshot should include pane one"
-assert_contains $'agent\ttwo\t'"$pane_two" "$snapshot_after_wide" "wide snapshot should include pane two"
+snapshot_after_wide="$(snapshot_output)"
+assert_contains $'entry\tone\t'"$pane_one" "$snapshot_after_wide" "wide snapshot should include pane one"
+assert_contains $'entry\ttwo\t'"$pane_two" "$snapshot_after_wide" "wide snapshot should include pane two"
 
 echo "ok - focus swaps through the store and wide restores panes"

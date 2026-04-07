@@ -27,6 +27,7 @@ set_default_option @agents_sidebar_width 45
 set_default_option @agents_sidebar_compact_window_name "__agents_sidebar_compact"
 set_default_option @agents_sidebar_pool_window_name "__agents_sidebar_pool"
 set_default_option @agents_sidebar_wide_window_name_default "agents-sidebar"
+set_default_option @agents_sidebar_done_ttl 20
 
 bind_agent_key m compact
 bind_agent_key M wide

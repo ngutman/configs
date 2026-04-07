@@ -26,10 +26,10 @@ assert_nonempty "$store_session" "compact mode should record the detached store 
 assert_nonempty "$store_window" "compact mode should record the detached store window"
 tmux_test has-session -t "$store_session" || fail "detached store session should exist"
 
-snapshot="$(controller snapshot)"
-assert_contains $'agent\tone\t'"$pane_one" "$snapshot" "snapshot should include the active pane"
-assert_contains $'agent\ttwo\t'"$pane_two" "$snapshot" "snapshot should include the inactive pane"
-assert_contains $'agent\ttwo\t'"$pane_two"$'\t'"$store_window"$'\t__agents_sidebar_store' "$snapshot" "inactive pane should live in the detached store window"
+snapshot="$(snapshot_output)"
+assert_contains $'entry\tone\t'"$pane_one" "$snapshot" "snapshot should include the active pane"
+assert_contains $'entry\ttwo\t'"$pane_two" "$snapshot" "snapshot should include the inactive pane"
+assert_contains $'entry\ttwo\t'"$pane_two"$'\t'"$store_window"$'\t__agents_sidebar_store\tagent' "$snapshot" "inactive pane should live in the detached store window as an agent entry"
 
 focus_pane="$(session_option @agents_sidebar_focus_pane)"
 focus_title="$(tmux_test display-message -p -t "$focus_pane" '#{pane_title}')"

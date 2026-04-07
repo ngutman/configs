@@ -46,11 +46,12 @@ This repo uses [gpakosz/.tmux](https://github.com/gpakosz/.tmux) as the base con
 ### Multi-agent compact sidebar workflow
 - Packaged as a local tmux plugin under `tmux/plugins/tmux-agents-sidebar`
 - Provides a `wide` mode for horizontal multi-pane viewing
-- Provides a `compact` mode with a persistent left sidebar and one focused agent pane
+- Provides a `compact` mode with a persistent left sidebar and one focused pane
 - In compact mode, inactive panes are parked in a detached tmux store session instead of visible helper windows in the main session
-- Uses stable pane registration via `@agents_sidebar_name_<pane_id>` options
-- Sidebar rows display `folder - (branch) - X` when branch / active state are available
-- Branch text is rendered in bright yellow, active marker uses colored foreground text, and no background highlight is used
+- Splits the sidebar into `Agents` and `Panes` sections
+- Uses stable pane registration via `@agents_sidebar_name_<pane_id>` plus per-pane metadata for `kind`, `provider`, and `status`
+- Detects coding agents heuristically (`pi`, `codex`, `claude`) and supports explicit pane classification
+- Includes a pi extension hook that marks pi panes as agents and updates their status during `agent_start`, `tool_execution_*`, and `agent_end`
 - Compact mode supports direct keyboard selection and mouse click selection in the sidebar
 - New managed panes can be created with a derived name from pane path + branch
 
@@ -106,12 +107,12 @@ When the plugin is enabled:
 ### Key bindings
 - `prefix m` — switch to compact mode
 - `prefix M` — switch to wide mode
-- `prefix N` — create a new managed pane and auto-label it from pane path / branch
+- `prefix N` — create a new managed agent pane and auto-label it from pane path / branch
 - `prefix a` — focus the sidebar pane
 - `prefix x` — kill the current managed pane using the custom compact-aware kill flow
-- `prefix ]` / `prefix [` — next / previous agent
-- `prefix Down` / `prefix Up` — next / previous agent
-- `prefix Tab` — toggle last active agent
+- `prefix ]` / `prefix [` — next / previous entry
+- `prefix Down` / `prefix Up` — next / previous entry
+- `prefix Tab` — toggle last active entry
 
 ### Commands
 ```bash
@@ -119,9 +120,15 @@ When the plugin is enabled:
 ~/workspace/configs/tmux/plugins/tmux-agents-sidebar/scripts/agents-sidebar wide
 ~/workspace/configs/tmux/plugins/tmux-agents-sidebar/scripts/agents-sidebar new
 ~/workspace/configs/tmux/plugins/tmux-agents-sidebar/scripts/agents-sidebar kill-current
+~/workspace/configs/tmux/plugins/tmux-agents-sidebar/scripts/agents-sidebar focus <name>
 ~/workspace/configs/tmux/plugins/tmux-agents-sidebar/scripts/agents-sidebar focus-sidebar
 ~/workspace/configs/tmux/plugins/tmux-agents-sidebar/scripts/agents-sidebar focus-right
 ~/workspace/configs/tmux/plugins/tmux-agents-sidebar/scripts/agents-sidebar register <pane-id> <name>
+~/workspace/configs/tmux/plugins/tmux-agents-sidebar/scripts/agents-sidebar mark-agent <pane-id> [provider] [label]
+~/workspace/configs/tmux/plugins/tmux-agents-sidebar/scripts/agents-sidebar mark-pane <pane-id> [label]
+~/workspace/configs/tmux/plugins/tmux-agents-sidebar/scripts/agents-sidebar set-status <pane-id> <status> [text]
+~/workspace/configs/tmux/plugins/tmux-agents-sidebar/scripts/agents-sidebar clear-status <pane-id>
+~/workspace/configs/tmux/plugins/tmux-agents-sidebar/scripts/agents-sidebar list-entries
 ~/workspace/configs/tmux/plugins/tmux-agents-sidebar/scripts/agents-sidebar list-agents
 ~/workspace/configs/tmux/plugins/tmux-agents-sidebar/scripts/agents-sidebar snapshot
 ~/workspace/configs/tmux/plugins/tmux-agents-sidebar/scripts/agents-sidebar cleanup-dead
@@ -132,12 +139,12 @@ When the plugin is enabled:
 
 ### Compact mode controls
 When the sidebar is focused:
-- `j` / `k` or arrow keys — move selection
-- `Enter` — focus selected agent
+- `j` / `k` or arrow keys — move selection across both sections
+- `Enter` — focus selected entry
 - `1..9` — direct switch
-- `n` / `p` — next / previous agent
+- `n` / `p` — next / previous entry
 - `Esc` / `q` — return focus to the active pane
-- mouse click — switch to clicked agent row
+- mouse click — switch to clicked row
 - mouse wheel — move selection
 
 ### Notes
@@ -145,6 +152,9 @@ When the sidebar is focused:
 - Branch text comes from the cached `@git_branch` pane option set by shell hooks in `~/.zshrc`.
 - Branch cache updates on both `precmd` and `chpwd`, so directory changes in interactive zsh panes update the sidebar more reliably.
 - Compact mode keeps inactive panes in a detached tmux session named like `__agents_sidebar_store_<session-key>`.
+- `register` and `new` create agent entries; ordinary shell panes stay in `Panes` unless you mark or detect them as agents.
+- Heuristic agent detection looks at explicit metadata first, then pane title / command / child-process hints.
+- `pi/agent/extensions/agents-sidebar-status.ts` publishes pi lifecycle status into tmux so pi panes update immediately when work starts, tools run, and turns complete.
 - If compact state gets stale, use:
 
 ```bash

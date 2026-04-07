@@ -104,6 +104,40 @@ register_pane() {
   controller register "$pane_id" "$label" >/dev/null
 }
 
+mark_agent() {
+  local pane_id="$1"
+  local provider="${2:-unknown}"
+  local label="${3:-}"
+  controller mark-agent "$pane_id" "$provider" "$label" >/dev/null
+}
+
+mark_pane() {
+  local pane_id="$1"
+  local label="${2:-}"
+  controller mark-pane "$pane_id" "$label" >/dev/null
+}
+
+set_pane_status() {
+  local pane_id="$1"
+  local status="$2"
+  local text="${3:-}"
+  controller set-status "$pane_id" "$status" "$text" >/dev/null
+}
+
+set_pane_title() {
+  local pane_id="$1"
+  local title="$2"
+  tmux_test select-pane -t "$pane_id" -T "$title"
+}
+
+snapshot_output() {
+  controller snapshot
+}
+
+status_output() {
+  controller status
+}
+
 session_option() {
   tmux_test show-option -qv -t "$TEST_SESSION_ID" "$1"
 }

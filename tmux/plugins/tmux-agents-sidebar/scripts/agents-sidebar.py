@@ -23,6 +23,7 @@ FG_GREEN = "\033[32m"
 FG_YELLOW = "\033[38;5;226m"
 FG_RED = "\033[31m"
 FG_GRAY = "\033[90m"
+FG_MAGENTA = "\033[35m"
 HIDE_CURSOR = "\033[?25l"
 SHOW_CURSOR = "\033[?25h"
 CLEAR_SCREEN = "\033[2J"
@@ -38,13 +39,18 @@ class SidebarError(RuntimeError):
 
 
 @dataclass(frozen=True)
-class Agent:
-    name: str
+class Entry:
+    label: str
     pane_id: str
     window_id: str
     window_name: str
+    kind: str
+    provider: str
+    status: str
+    status_text: str
     folder: str
     branch: str
+    command: str
     active: bool
 
 
@@ -58,7 +64,7 @@ class SidebarState:
     epoch: int
     width: int
     height: int
-    agents: List[Agent]
+    entries: List[Entry]
 
 
 class TerminalController:
@@ -118,7 +124,7 @@ class SidebarApp:
         epoch = 0
         width = 0
         height = 0
-        agents: List[Agent] = []
+        entries: List[Entry] = []
 
         for raw_line in proc.stdout.splitlines():
             if not raw_line:
@@ -140,17 +146,21 @@ class SidebarApp:
             elif kind == "size":
                 width = int(parts[1]) if len(parts) > 1 and parts[1] else 0
                 height = int(parts[2]) if len(parts) > 2 and parts[2] else 0
-            elif kind == "agent" and len(parts) >= 7:
-                name, pane_id, window_id, window_name, folder, branch = parts[1], parts[2], parts[3], parts[4], parts[5], parts[6]
-                agents.append(
-                    Agent(
-                        name=name,
-                        pane_id=pane_id,
-                        window_id=window_id,
-                        window_name=window_name,
-                        folder=folder,
-                        branch=branch,
-                        active=name == active_name,
+            elif kind == "entry" and len(parts) >= 13:
+                entries.append(
+                    Entry(
+                        label=parts[1],
+                        pane_id=parts[2],
+                        window_id=parts[3],
+                        window_name=parts[4],
+                        kind=parts[5],
+                        provider=parts[6],
+                        status=parts[7],
+                        status_text=parts[8],
+                        folder=parts[9],
+                        branch=parts[10],
+                        command=parts[11],
+                        active=(parts[12] == "1"),
                     )
                 )
 
@@ -163,15 +173,21 @@ class SidebarApp:
             epoch=epoch,
             width=width,
             height=height,
-            agents=agents,
+            entries=entries,
         )
 
+    def ordered_entries(self, state: SidebarState) -> List[Entry]:
+        agents = [entry for entry in state.entries if entry.kind == "agent"]
+        panes = [entry for entry in state.entries if entry.kind != "agent"]
+        return agents + panes
+
     def sync_selection(self, previous: Optional[SidebarState], current: SidebarState) -> None:
-        if not current.agents:
+        ordered = self.ordered_entries(current)
+        if not ordered:
             self.selected_index = 0
             return
 
-        names = [agent.name for agent in current.agents]
+        names = [entry.label for entry in ordered]
         if self.selected_index >= len(names):
             self.selected_index = len(names) - 1
 
@@ -198,14 +214,6 @@ class SidebarApp:
         self.sync_selection(previous, current)
         self.state = current
 
-    def row_window(self, state: SidebarState) -> Tuple[int, int, List[Agent]]:
-        rows_available = max(1, state.height - 8)
-        start = 0
-        if self.selected_index >= rows_available:
-            start = self.selected_index - rows_available + 1
-        visible = state.agents[start : start + rows_available]
-        return start, rows_available, visible
-
     def crop_plain(self, text: str, width: int) -> str:
         if width <= 0:
             return ""
@@ -222,11 +230,6 @@ class SidebarApp:
     def render_line(self, plain: str, *styles: str) -> str:
         return "".join(styles) + plain + RESET
 
-    def marker(self, agent: Agent) -> Tuple[str, str]:
-        if agent.active:
-            return "X", FG_CYAN
-        return "", FG_GRAY
-
     def visible_len(self, text: str) -> int:
         return len(ANSI_RE.sub("", text))
 
@@ -236,22 +239,67 @@ class SidebarApp:
             return text
         return text + (" " * (width - plain_len))
 
-    def agent_row(self, index: int, agent: Agent, selected: bool, width: int) -> str:
-        folder = agent.folder or agent.name
-        branch = agent.branch.strip()
-        active_suffix = " - X" if agent.active else ""
-        base_plain = f" {index:>2} {folder}"
-        branch_plain = f" - ({branch})" if branch else ""
-        full_plain = f"{base_plain}{branch_plain}{active_suffix}"
+    def provider_badge(self, entry: Entry) -> Tuple[str, str]:
+        provider = entry.provider.lower()
+        if provider == "pi":
+            return "π", FG_CYAN
+        if provider == "codex":
+            return "cdx", FG_MAGENTA
+        if provider == "claude":
+            return "cld", FG_YELLOW
+        if provider == "shell":
+            return "sh", FG_GRAY
+        return "?", FG_GRAY
 
-        if len(full_plain) > width:
-            plain = self.pad_plain(full_plain, width)
-            style_parts: List[str] = []
+    def status_suffix(self, entry: Entry) -> str:
+        if entry.status == "tool":
+            return f" ⚙ {entry.status_text}" if entry.status_text else " ⚙"
+        if entry.status == "running":
+            return " …"
+        if entry.status == "done":
+            return " ✓"
+        if entry.status == "unknown":
+            return " ?"
+        return ""
+
+    def entry_display_name(self, entry: Entry) -> str:
+        return entry.label or entry.folder or entry.command or entry.pane_id
+
+    def entry_secondary(self, entry: Entry) -> str:
+        name = self.entry_display_name(entry)
+        parts: List[str] = []
+        if entry.kind == "agent":
+            if entry.folder and entry.folder != name:
+                parts.append(entry.folder)
+        else:
+            if entry.command and entry.command.lower() not in {"zsh", "bash", "fish", "sh", "tmux"}:
+                parts.append(entry.command)
+            elif entry.folder and entry.folder != name:
+                parts.append(entry.folder)
+        return " · ".join(parts)
+
+    def entry_row(self, index: int, entry: Entry, selected: bool, width: int) -> str:
+        badge, badge_color = self.provider_badge(entry)
+        name = self.entry_display_name(entry)
+        secondary = self.entry_secondary(entry)
+        branch = entry.branch.strip()
+        status_suffix = self.status_suffix(entry)
+
+        plain = f" {index:>2} {badge} {name}"
+        if secondary:
+            plain += f" · {secondary}"
+        if branch:
+            plain += f" ({branch})"
+        plain += status_suffix
+
+        if len(plain) > width:
+            truncated = self.pad_plain(plain, width)
+            styles: List[str] = []
             if selected:
-                style_parts.extend([FG_CYAN, BOLD])
-            elif agent.active:
-                style_parts.append(BOLD)
-            return self.render_line(plain, *style_parts)
+                styles.extend([FG_CYAN, BOLD])
+            elif entry.active:
+                styles.append(BOLD)
+            return self.render_line(truncated, *styles)
 
         parts: List[str] = []
         if selected:
@@ -259,39 +307,91 @@ class SidebarApp:
         else:
             parts.extend([DIM, f" {index:>2} ", RESET])
 
-        if selected:
-            parts.append(f" {index:>2} ")
-        parts.append(BOLD if (agent.active or selected) else "")
-        parts.append(folder)
-        if branch:
-            parts.extend([DIM, " - ", FG_YELLOW, f"({branch})", RESET])
-        if agent.active:
-            parts.extend([DIM, " - ", FG_GREEN, BOLD, "X", RESET])
-        elif selected:
+        parts.extend([badge_color, badge, RESET, " "])
+        if selected or entry.active:
+            parts.append(BOLD)
+        parts.append(name)
+        if selected or entry.active:
             parts.append(RESET)
+        if secondary:
+            parts.extend([DIM, " · ", secondary, RESET])
+        if branch:
+            parts.extend([DIM, " (", FG_YELLOW, branch, DIM, ")", RESET])
+        if entry.status == "tool":
+            parts.extend([DIM, " ", FG_YELLOW, "⚙", RESET])
+            if entry.status_text:
+                parts.extend([DIM, f" {entry.status_text}", RESET])
+        elif entry.status == "running":
+            parts.extend([DIM, " ", FG_CYAN, "…", RESET])
+        elif entry.status == "done":
+            parts.extend([DIM, " ", FG_GREEN, "✓", RESET])
+        elif entry.status == "unknown":
+            parts.extend([DIM, " ", FG_RED, "?", RESET])
         return self.pad_ansi("".join(parts), width)
 
+    def build_body_rows(self, state: SidebarState, width: int) -> List[Tuple[str, Optional[int]]]:
+        ordered = self.ordered_entries(state)
+        agents = [entry for entry in ordered if entry.kind == "agent"]
+        panes = [entry for entry in ordered if entry.kind != "agent"]
+        rows: List[Tuple[str, Optional[int]]] = []
+
+        rows.append((self.render_line(self.pad_plain(f" Agents ({len(agents)}) ", width), BOLD, FG_CYAN), None))
+        if agents:
+            for index, entry in enumerate(agents):
+                rows.append((self.entry_row(index + 1, entry, index == self.selected_index, width), index))
+        else:
+            rows.append((self.render_line(self.pad_plain(" -- no detected coding agents --", width), DIM), None))
+
+        rows.append((self.pad_plain("", width), None))
+        rows.append((self.render_line(self.pad_plain(f" Panes ({len(panes)}) ", width), BOLD, FG_GREEN), None))
+        if panes:
+            start = len(agents)
+            for offset, entry in enumerate(panes, start=start):
+                rows.append((self.entry_row(offset + 1, entry, offset == self.selected_index, width), offset))
+        else:
+            rows.append((self.render_line(self.pad_plain(" -- no regular panes --", width), DIM), None))
+
+        return rows
+
+    def footer_line_count(self) -> int:
+        return 7
+
+    def body_window(self, state: SidebarState, width: int) -> Tuple[int, int, List[Tuple[str, Optional[int]]]]:
+        rows = self.build_body_rows(state, width)
+        viewport = max(1, max(8, state.height) - self.footer_line_count())
+        selected_row = 0
+        for idx, (_line, entry_index) in enumerate(rows):
+            if entry_index == self.selected_index:
+                selected_row = idx
+                break
+
+        start = 0
+        if selected_row >= viewport:
+            start = selected_row - viewport + 1
+        visible = rows[start : start + viewport]
+        return start, viewport, visible
+
     def build_lines(self, state: SidebarState) -> List[str]:
-        width = max(20, state.width)
-        height = max(8, state.height)
+        width = max(24, state.width)
+        height = max(10, state.height)
         separator = "─" * width
         lines: List[str] = []
 
-        lines.append(self.render_line(self.pad_plain(" Agents ", width), BOLD, FG_CYAN))
-        lines.append(self.render_line(self.pad_plain(separator, width), DIM))
-
-        start, rows_available, visible_agents = self.row_window(state)
-        for offset, agent in enumerate(visible_agents, start=start):
-            lines.append(self.agent_row(offset + 1, agent, offset == self.selected_index, width))
-
-        while len(lines) < 2 + rows_available:
+        _start, body_height, visible_rows = self.body_window(state, width)
+        for line, _entry_index in visible_rows:
+            lines.append(line)
+        while len(lines) < body_height:
             lines.append(self.pad_plain("", width))
 
+        ordered = self.ordered_entries(state)
+        agents_count = len([entry for entry in ordered if entry.kind == "agent"])
+        panes_count = len(ordered) - agents_count
         lines.append(self.render_line(self.pad_plain(separator, width), DIM))
-        lines.append(self.render_line(self.pad_plain(f" last  {state.last_active_name or '—'}", width), DIM))
-        lines.append(self.render_line(self.pad_plain(f" mode  {state.mode}", width), DIM))
-        lines.append(self.render_line(self.pad_plain(" j/k move  enter switch", width), FG_GRAY))
-        lines.append(self.render_line(self.pad_plain(" 1-9 direct  esc focus", width), FG_GRAY))
+        lines.append(self.render_line(self.pad_plain(f" last   {state.last_active_name or '—'}", width), DIM))
+        lines.append(self.render_line(self.pad_plain(f" counts a:{agents_count} p:{panes_count}  mode {state.mode or '—'}", width), DIM))
+        lines.append(self.render_line(self.pad_plain(" enter focus  esc active", width), FG_GRAY))
+        lines.append(self.render_line(self.pad_plain(" j/k move  n/p cycle", width), FG_GRAY))
+        lines.append(self.render_line(self.pad_plain(" 1-9 direct  r refresh", width), FG_GRAY))
 
         if self.message:
             lines.append(self.render_line(self.pad_plain(f" {self.message}", width), FG_YELLOW, BOLD))
@@ -338,14 +438,20 @@ class SidebarApp:
         self.force_snapshot = True
 
     def move_selection(self, delta: int) -> None:
-        if self.state is None or not self.state.agents:
+        if self.state is None:
             return
-        self.selected_index = (self.selected_index + delta) % len(self.state.agents)
+        ordered = self.ordered_entries(self.state)
+        if not ordered:
+            return
+        self.selected_index = (self.selected_index + delta) % len(ordered)
 
-    def selected_agent(self) -> Optional[Agent]:
-        if self.state is None or not self.state.agents:
+    def selected_entry(self) -> Optional[Entry]:
+        if self.state is None:
             return None
-        return self.state.agents[self.selected_index]
+        ordered = self.ordered_entries(self.state)
+        if not ordered:
+            return None
+        return ordered[self.selected_index]
 
     def read_key(self, timeout: float) -> Optional[str]:
         ready, _, _ = select.select([sys.stdin], [], [], timeout)
@@ -393,10 +499,9 @@ class SidebarApp:
         if not match:
             return False
         button = int(match.group(1))
-        x = int(match.group(2))
+        _x = int(match.group(2))
         y = int(match.group(3))
         kind = match.group(4)
-        _ = x
 
         if kind != "M":
             return True
@@ -408,13 +513,15 @@ class SidebarApp:
             self.move_selection(1)
             return True
 
-        start, _rows_available, visible_agents = self.row_window(self.state)
-        agent_row_start = 3
-        if 0 <= button <= 2 and agent_row_start <= y < agent_row_start + len(visible_agents):
-            index = start + (y - agent_row_start)
-            if 0 <= index < len(self.state.agents):
-                self.selected_index = index
-                self.focus_name(self.state.agents[index].name)
+        width = max(24, self.state.width)
+        _start, _body_height, visible_rows = self.body_window(self.state, width)
+        row_index = y - 1
+        if 0 <= row_index < len(visible_rows):
+            entry_index = visible_rows[row_index][1]
+            if entry_index is not None and 0 <= entry_index < len(self.ordered_entries(self.state)):
+                self.selected_index = entry_index
+                entry = self.ordered_entries(self.state)[entry_index]
+                self.focus_name(entry.label)
             return True
         return False
 
@@ -430,13 +537,14 @@ class SidebarApp:
         if key == "g":
             self.selected_index = 0
             return
-        if key == "G" and self.state.agents:
-            self.selected_index = len(self.state.agents) - 1
+        ordered = self.ordered_entries(self.state)
+        if key == "G" and ordered:
+            self.selected_index = len(ordered) - 1
             return
         if key == "enter":
-            agent = self.selected_agent()
-            if agent is not None:
-                self.focus_name(agent.name)
+            entry = self.selected_entry()
+            if entry is not None:
+                self.focus_name(entry.label)
             return
         if key in ("escape", "q"):
             self.controller_command("focus-right", "failed to focus active pane")
@@ -447,18 +555,18 @@ class SidebarApp:
             self.set_message("refreshed", 0.8)
             return
         if key == "n":
-            self.controller_command("next", "failed to focus next agent")
+            self.controller_command("next", "failed to focus next entry")
             return
         if key == "p":
-            self.controller_command("prev", "failed to focus previous agent")
+            self.controller_command("prev", "failed to focus previous entry")
             return
         if key and key.isdigit() and key != "0":
             index = int(key) - 1
-            if 0 <= index < len(self.state.agents):
+            if 0 <= index < len(ordered):
                 self.selected_index = index
-                self.focus_name(self.state.agents[index].name)
+                self.focus_name(ordered[index].label)
             else:
-                self.set_message(f"no agent {key}", 1.2)
+                self.set_message(f"no entry {key}", 1.2)
             return
         if key.startswith("\x1b[<"):
             self.handle_mouse(key)
