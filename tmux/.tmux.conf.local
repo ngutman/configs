@@ -364,9 +364,6 @@ bind-key -T copy-mode-vi C-a send-keys -X previous-word
 # move status line to top
 #set -g status-position top
 
-# local tmux-agents-sidebar plugin
-run-shell "$HOME/.tmux/plugins/tmux-agents-sidebar/plugin.tmux"
-
 # tmux-pane-tree plugin
 source-file "$HOME/.tmux/plugins/tmux-pane-tree/tmux-pane-tree.tmux"
 
@@ -443,11 +440,9 @@ set -g pane-border-lines double
 set -g pane-active-border-style "fg=colour51,bg=default,bold"
 
 # Show per-pane info at pane bottom using a branch name cached by the shell.
-# Pi panes also publish a lightweight activity indicator via @pi_session_indicator:
-#   [·] waiting for input  [●] running  [⚙] tool  [✓] finished  [✗] errored
 set -g status-interval 15
 set-window-option -g pane-border-status bottom
-set-window-option -g pane-border-format '#[fg=colour51,bold]P#{pane_index}#{?@pi_session_indicator, #{@pi_session_indicator},} #[fg=colour223]#{b:pane_current_path}#{?@git_branch, #[fg=#ffff00]#{@git_branch},}#[default]'
+set-window-option -g pane-border-format '#[fg=colour51,bold]P#{pane_index} #[fg=colour223]#{b:pane_current_path}#{?@git_branch, #[fg=#ffff00]#{@git_branch},}#[default]'
 
 # Refresh battery state in a separate background loop and expose cached values
 # via @battery_* variables for the status line.

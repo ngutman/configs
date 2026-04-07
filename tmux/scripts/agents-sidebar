@@ -1,8 +1,0 @@
-#!/usr/bin/env bash
-# Convenience wrapper for the tmux-agents-sidebar controller.
-set -euo pipefail
-
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-PLUGIN_SCRIPT="$SCRIPT_DIR/../plugins/tmux-agents-sidebar/scripts/agents-sidebar"
-
-exec "$PLUGIN_SCRIPT" "$@"
