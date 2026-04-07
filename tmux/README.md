@@ -44,47 +44,52 @@ This repo uses [gpakosz/.tmux](https://github.com/gpakosz/.tmux) as the base con
 - A small post-load helper reapplies the lightweight `status-right` after the theme initializes
 
 ### Multi-agent compact sidebar workflow
+- Packaged as a local tmux plugin under `tmux/plugins/tmux-agents-sidebar`
 - Provides a `wide` mode for horizontal multi-pane viewing
 - Provides a `compact` mode with a persistent left sidebar and one focused agent pane
-- Uses stable pane registration via `@agent_name_<pane_id>` options
+- In compact mode, inactive panes are parked in a detached tmux store session instead of visible helper windows in the main session
+- Uses stable pane registration via `@agents_sidebar_name_<pane_id>` options
 - Sidebar rows display `folder - (branch) - X` when branch / active state are available
 - Branch text is rendered in bright yellow, active marker uses colored foreground text, and no background highlight is used
 - Compact mode supports direct keyboard selection and mouse click selection in the sidebar
 - New managed panes can be created with a derived name from pane path + branch
 
-## Agent layout files
+## tmux-agents-sidebar plugin
 
-The agent-layout implementation lives in this repo and is linked into `~/.tmux`.
-It requires `bash`, `tmux`, and `python3` (for the interactive sidebar UI):
+The canonical tmux-agents-sidebar implementation now lives here:
 
-- `tmux/agent-layout.conf`
-- `tmux/scripts/agent-layout`
-- `tmux/scripts/agent-sidebar.py`
+- `tmux/plugins/tmux-agents-sidebar/plugin.tmux`
+- `tmux/plugins/tmux-agents-sidebar/scripts/agents-sidebar`
+- `tmux/plugins/tmux-agents-sidebar/scripts/agents-sidebar.py`
 
-Expected links:
+It requires `bash`, `tmux`, and `python3` (for the interactive sidebar UI).
 
-```bash
-ln -sfn ~/workspace/configs/tmux/agent-layout.conf ~/.tmux/agent-layout.conf
-ln -sfn ~/workspace/configs/tmux/scripts/agent-layout ~/.tmux/scripts/agent-layout
-ln -sfn ~/workspace/configs/tmux/scripts/agent-sidebar.py ~/.tmux/scripts/agent-sidebar.py
-```
-
-The active local config should remain linked here as well:
+The local tmux config loads the plugin from the standard tmux plugin path.
+Link it into place like this:
 
 ```bash
-ln -sfn ~/workspace/configs/tmux/.tmux.conf.local ~/.tmux.conf.local
+mkdir -p ~/.tmux/plugins
+ln -sfn ~/workspace/configs/tmux/plugins/tmux-agents-sidebar ~/.tmux/plugins/tmux-agents-sidebar
 ```
 
-`~/.tmux.conf.local` sources `~/.tmux/agent-layout.conf`, so the symlink above is the active entrypoint.
+```tmux
+run-shell "$HOME/.tmux/plugins/tmux-agents-sidebar/plugin.tmux"
+```
+
+Convenience entrypoints also live at:
+
+- `tmux/agents-sidebar.conf`
+- `tmux/scripts/agents-sidebar`
+- `tmux/scripts/agents-sidebar.py`
+
+Those make it easy to symlink or invoke the plugin from `~/.tmux`.
 
 ## Helper scripts
 
-The config expects these helper scripts to exist under `~/.tmux/scripts/`:
+The active tmux config expects these helper scripts to exist under `~/.tmux/scripts/`:
 
 - `tmux/scripts/tmux-battery-cache.sh`
 - `tmux/scripts/tmux-apply-fast-status.sh`
-- `tmux/scripts/agent-layout`
-- `tmux/scripts/agent-sidebar.py`
 
 Suggested setup:
 
@@ -92,12 +97,11 @@ Suggested setup:
 mkdir -p ~/.tmux/scripts
 ln -sfn ~/workspace/configs/tmux/scripts/tmux-battery-cache.sh ~/.tmux/scripts/tmux-battery-cache.sh
 ln -sfn ~/workspace/configs/tmux/scripts/tmux-apply-fast-status.sh ~/.tmux/scripts/tmux-apply-fast-status.sh
-ln -sfn ~/workspace/configs/tmux/scripts/agent-layout ~/.tmux/scripts/agent-layout
-ln -sfn ~/workspace/configs/tmux/scripts/agent-sidebar.py ~/.tmux/scripts/agent-sidebar.py
-ln -sfn ~/workspace/configs/tmux/agent-layout.conf ~/.tmux/agent-layout.conf
 ```
 
-## Agent layout usage
+## tmux-agents-sidebar usage
+
+When the plugin is enabled:
 
 ### Key bindings
 - `prefix m` — switch to compact mode
@@ -111,19 +115,19 @@ ln -sfn ~/workspace/configs/tmux/agent-layout.conf ~/.tmux/agent-layout.conf
 
 ### Commands
 ```bash
-~/.tmux/scripts/agent-layout compact
-~/.tmux/scripts/agent-layout wide
-~/.tmux/scripts/agent-layout new
-~/.tmux/scripts/agent-layout kill-current
-~/.tmux/scripts/agent-layout focus-sidebar
-~/.tmux/scripts/agent-layout focus-right
-~/.tmux/scripts/agent-layout register <pane-id> <name>
-~/.tmux/scripts/agent-layout list-agents
-~/.tmux/scripts/agent-layout snapshot
-~/.tmux/scripts/agent-layout cleanup-dead
-~/.tmux/scripts/agent-layout refresh
-~/.tmux/scripts/agent-layout repair
-~/.tmux/scripts/agent-layout status
+~/workspace/configs/tmux/plugins/tmux-agents-sidebar/scripts/agents-sidebar compact
+~/workspace/configs/tmux/plugins/tmux-agents-sidebar/scripts/agents-sidebar wide
+~/workspace/configs/tmux/plugins/tmux-agents-sidebar/scripts/agents-sidebar new
+~/workspace/configs/tmux/plugins/tmux-agents-sidebar/scripts/agents-sidebar kill-current
+~/workspace/configs/tmux/plugins/tmux-agents-sidebar/scripts/agents-sidebar focus-sidebar
+~/workspace/configs/tmux/plugins/tmux-agents-sidebar/scripts/agents-sidebar focus-right
+~/workspace/configs/tmux/plugins/tmux-agents-sidebar/scripts/agents-sidebar register <pane-id> <name>
+~/workspace/configs/tmux/plugins/tmux-agents-sidebar/scripts/agents-sidebar list-agents
+~/workspace/configs/tmux/plugins/tmux-agents-sidebar/scripts/agents-sidebar snapshot
+~/workspace/configs/tmux/plugins/tmux-agents-sidebar/scripts/agents-sidebar cleanup-dead
+~/workspace/configs/tmux/plugins/tmux-agents-sidebar/scripts/agents-sidebar refresh
+~/workspace/configs/tmux/plugins/tmux-agents-sidebar/scripts/agents-sidebar repair
+~/workspace/configs/tmux/plugins/tmux-agents-sidebar/scripts/agents-sidebar status
 ```
 
 ### Compact mode controls
@@ -140,11 +144,21 @@ When the sidebar is focused:
 - Folder text comes from the pane current path basename.
 - Branch text comes from the cached `@git_branch` pane option set by shell hooks in `~/.zshrc`.
 - Branch cache updates on both `precmd` and `chpwd`, so directory changes in interactive zsh panes update the sidebar more reliably.
+- Compact mode keeps inactive panes in a detached tmux session named like `__agents_sidebar_store_<session-key>`.
 - If compact state gets stale, use:
 
 ```bash
-~/.tmux/scripts/agent-layout wide
-~/.tmux/scripts/agent-layout compact
+~/workspace/configs/tmux/plugins/tmux-agents-sidebar/scripts/agents-sidebar wide
+~/workspace/configs/tmux/plugins/tmux-agents-sidebar/scripts/agents-sidebar compact
+```
+
+## Tests
+
+The plugin includes executable shell integration tests modeled after common tmux plugin test layouts (`run_tests` + `tests/test_*.sh`). Run them from the plugin directory:
+
+```bash
+cd ~/workspace/configs/tmux/plugins/tmux-agents-sidebar
+./run_tests
 ```
 
 ## Reload

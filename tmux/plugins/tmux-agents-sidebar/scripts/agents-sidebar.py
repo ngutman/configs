@@ -488,7 +488,7 @@ def main() -> int:
     args = parser.parse_args()
 
     if not sys.stdin.isatty() or not sys.stdout.isatty():
-        print("agent-sidebar: stdin/stdout must be a tty", file=sys.stderr)
+        print("agents-sidebar: stdin/stdout must be a tty", file=sys.stderr)
         return 1
 
     try:
@@ -496,7 +496,7 @@ def main() -> int:
     except KeyboardInterrupt:
         return 0
     except Exception as error:
-        print(f"agent-sidebar: {error}", file=sys.stderr)
+        print(f"agents-sidebar: {error}", file=sys.stderr)
         return 1
 
 

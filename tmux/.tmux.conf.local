@@ -364,8 +364,11 @@ bind-key -T copy-mode-vi C-a send-keys -X previous-word
 # move status line to top
 #set -g status-position top
 
-# multi-agent compact sidebar layout
-if-shell '[ -f ~/.tmux/agent-layout.conf ]' 'source-file ~/.tmux/agent-layout.conf'
+# local tmux-agents-sidebar plugin
+run-shell "$HOME/.tmux/plugins/tmux-agents-sidebar/plugin.tmux"
+
+# tmux-pane-tree plugin
+source-file "$HOME/.tmux/plugins/tmux-pane-tree/tmux-pane-tree.tmux"
 
 # -- tpm -----------------------------------------------------------------------
 
