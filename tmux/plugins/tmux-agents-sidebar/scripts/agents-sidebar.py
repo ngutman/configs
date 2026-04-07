@@ -239,17 +239,9 @@ class SidebarApp:
             return text
         return text + (" " * (width - plain_len))
 
-    def provider_badge(self, entry: Entry) -> Tuple[str, str]:
-        provider = entry.provider.lower()
-        if provider == "pi":
-            return "π", FG_CYAN
-        if provider == "codex":
-            return "cdx", FG_MAGENTA
-        if provider == "claude":
-            return "cld", FG_YELLOW
-        if provider == "shell":
-            return "sh", FG_GRAY
-        return "?", FG_GRAY
+    def provider_label(self, entry: Entry) -> str:
+        _provider = entry.provider.lower()
+        return ""
 
     def status_suffix(self, entry: Entry) -> str:
         if entry.status == "tool":
@@ -258,6 +250,8 @@ class SidebarApp:
             return " …"
         if entry.status == "done":
             return " ✓"
+        if entry.status == "error":
+            return " ✗"
         if entry.status == "unknown":
             return " ?"
         return ""
@@ -279,40 +273,41 @@ class SidebarApp:
         return " · ".join(parts)
 
     def entry_row(self, index: int, entry: Entry, selected: bool, width: int) -> str:
-        badge, badge_color = self.provider_badge(entry)
+        provider = self.provider_label(entry)
         name = self.entry_display_name(entry)
         secondary = self.entry_secondary(entry)
         branch = entry.branch.strip()
         status_suffix = self.status_suffix(entry)
 
-        plain = f" {index:>2} {badge} {name}"
+        plain = f" {index:>2} {name}"
+        if provider:
+            plain += f" [{provider}]"
         if secondary:
             plain += f" · {secondary}"
         if branch:
             plain += f" ({branch})"
         plain += status_suffix
 
+        if selected:
+            return self.render_line(self.pad_plain(plain, width), FG_CYAN, BOLD)
+
         if len(plain) > width:
             truncated = self.pad_plain(plain, width)
             styles: List[str] = []
-            if selected:
-                styles.extend([FG_CYAN, BOLD])
-            elif entry.active:
+            if entry.active:
                 styles.append(BOLD)
             return self.render_line(truncated, *styles)
 
         parts: List[str] = []
-        if selected:
-            parts.extend([FG_CYAN, BOLD])
-        else:
-            parts.extend([DIM, f" {index:>2} ", RESET])
+        parts.extend([DIM, f" {index:>2} ", RESET])
 
-        parts.extend([badge_color, badge, RESET, " "])
-        if selected or entry.active:
+        if entry.active:
             parts.append(BOLD)
         parts.append(name)
-        if selected or entry.active:
+        if entry.active:
             parts.append(RESET)
+        if provider:
+            parts.extend([DIM, f" [{provider}]", RESET])
         if secondary:
             parts.extend([DIM, " · ", secondary, RESET])
         if branch:
@@ -325,6 +320,8 @@ class SidebarApp:
             parts.extend([DIM, " ", FG_CYAN, "…", RESET])
         elif entry.status == "done":
             parts.extend([DIM, " ", FG_GREEN, "✓", RESET])
+        elif entry.status == "error":
+            parts.extend([DIM, " ", FG_RED, "✗", RESET])
         elif entry.status == "unknown":
             parts.extend([DIM, " ", FG_RED, "?", RESET])
         return self.pad_ansi("".join(parts), width)
@@ -389,7 +386,7 @@ class SidebarApp:
         lines.append(self.render_line(self.pad_plain(separator, width), DIM))
         lines.append(self.render_line(self.pad_plain(f" last   {state.last_active_name or '—'}", width), DIM))
         lines.append(self.render_line(self.pad_plain(f" counts a:{agents_count} p:{panes_count}  mode {state.mode or '—'}", width), DIM))
-        lines.append(self.render_line(self.pad_plain(" enter focus  esc active", width), FG_GRAY))
+        lines.append(self.render_line(self.pad_plain(" enter switch  esc active", width), FG_GRAY))
         lines.append(self.render_line(self.pad_plain(" j/k move  n/p cycle", width), FG_GRAY))
         lines.append(self.render_line(self.pad_plain(" 1-9 direct  r refresh", width), FG_GRAY))
 
@@ -424,8 +421,9 @@ class SidebarApp:
             sys.stdout.flush()
             self.last_lines = list(lines)
 
-    def focus_name(self, name: str) -> None:
-        proc = self.run_controller("focus", name)
+    def focus_name(self, name: str, keep_sidebar: bool = False) -> None:
+        command = "focus-keep-sidebar" if keep_sidebar else "focus"
+        proc = self.run_controller(command, name)
         if proc.returncode != 0:
             raise SidebarError(proc.stderr.strip() or proc.stdout.strip() or f"failed to focus {name}")
         self.force_snapshot = True
@@ -521,7 +519,7 @@ class SidebarApp:
             if entry_index is not None and 0 <= entry_index < len(self.ordered_entries(self.state)):
                 self.selected_index = entry_index
                 entry = self.ordered_entries(self.state)[entry_index]
-                self.focus_name(entry.label)
+                self.focus_name(entry.label, keep_sidebar=True)
             return True
         return False
 
@@ -544,7 +542,7 @@ class SidebarApp:
         if key == "enter":
             entry = self.selected_entry()
             if entry is not None:
-                self.focus_name(entry.label)
+                self.focus_name(entry.label, keep_sidebar=True)
             return
         if key in ("escape", "q"):
             self.controller_command("focus-right", "failed to focus active pane")
@@ -555,16 +553,16 @@ class SidebarApp:
             self.set_message("refreshed", 0.8)
             return
         if key == "n":
-            self.controller_command("next", "failed to focus next entry")
+            self.controller_command("next-keep-sidebar", "failed to focus next entry")
             return
         if key == "p":
-            self.controller_command("prev", "failed to focus previous entry")
+            self.controller_command("prev-keep-sidebar", "failed to focus previous entry")
             return
         if key and key.isdigit() and key != "0":
             index = int(key) - 1
             if 0 <= index < len(ordered):
                 self.selected_index = index
-                self.focus_name(ordered[index].label)
+                self.focus_name(ordered[index].label, keep_sidebar=True)
             else:
                 self.set_message(f"no entry {key}", 1.2)
             return

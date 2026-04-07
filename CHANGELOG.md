@@ -12,7 +12,7 @@ All notable shareable config changes in this repo are tracked here.
 - tmux-agents-sidebar shell integration tests under:
   - `tmux/plugins/tmux-agents-sidebar/run_tests`
   - `tmux/plugins/tmux-agents-sidebar/tests/`
-- Pi extension hook for tmux-agents-sidebar status updates:
+- Pi extension hook for tmux-agents-sidebar status updates and pane-border activity indicators:
   - `pi/agent/extensions/agents-sidebar-status.ts`
 - tmux key bindings for compact/wide mode, agent cycling, sidebar focus, compact-aware pane creation / killing, and prefix `Up` / `Down` agent navigation
 - cached per-pane git branch display in tmux pane borders
@@ -25,10 +25,11 @@ All notable shareable config changes in this repo are tracked here.
 - zsh now caches git branch metadata into tmux pane options on both `precmd` and `chpwd`
 - tmux session auto-rename now uses the current directory name without appending the branch
 - tmux-agents-sidebar is loaded via a local plugin entrypoint and now renders separate `Agents` and `Panes` sections backed by pane metadata + heuristics for `pi`, `codex`, and `claude`
+- tmux pane borders now show Pi activity indicators for waiting, running, tool execution, success, and error states when the Pi extension hook is enabled
 - tmux-agents-sidebar compact mode now parks inactive panes in a detached tmux store session instead of visible helper windows in the main session
 - Pi defaults now use `gpt-5.4`
 - Pi sub-core usage tools are enabled
 
 ### Docs
-- expanded `tmux/README.md` with plugin-based agents sidebar setup, two-section sidebar behavior, metadata commands, and test notes
-- updated the root `README.md` to cover the plugin layout, pi extension symlinks, and changelog
+- expanded `tmux/README.md` with plugin-based agents sidebar setup, Pi pane-indicator setup, two-section sidebar behavior, metadata commands, and test notes
+- updated the root `README.md` to cover the plugin layout, Pi extension symlinks, reload step, and changelog

@@ -18,12 +18,14 @@ store_session_before="$(session_option @agents_sidebar_store_session)"
 store_window_before="$(session_option @agents_sidebar_store_window)"
 compact_window="$(session_option @agents_sidebar_compact_window)"
 
-controller focus two >/dev/null
+controller focus-keep-sidebar two >/dev/null
 status_after_focus="$(status_output)"
+sidebar_pane="$(session_option @agents_sidebar_pane)"
 assert_contains "active_name: two" "$status_after_focus" "focus should switch the active label"
 assert_eq "$pane_two" "$(session_option @agents_sidebar_focus_pane)" "focus pane option should track the newly focused pane"
 assert_eq "$compact_window" "$(pane_window_id "$pane_two")" "focused pane should move into the visible compact window"
 assert_eq "$store_window_before" "$(pane_window_id "$pane_one")" "previously active pane should move into the detached store window"
+assert_eq "$sidebar_pane" "$(active_pane_in_window "$compact_window")" "focus-keep-sidebar should leave keyboard focus in the sidebar"
 
 controller wide >/dev/null
 

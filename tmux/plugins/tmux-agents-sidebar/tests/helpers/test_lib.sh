@@ -86,7 +86,7 @@ cleanup_test_server() {
     "$REAL_TMUX" -L "$TEST_SOCKET" kill-server >/dev/null 2>&1 || true
   fi
   if [[ -n "$TEST_TMPDIR" ]]; then
-    rm -rf "$TEST_TMPDIR"
+    rm -rf "$TEST_TMPDIR" >/dev/null 2>&1 || true
   fi
 }
 
@@ -144,6 +144,10 @@ session_option() {
 
 pane_window_id() {
   tmux_test display-message -p -t "$1" '#{window_id}'
+}
+
+active_pane_in_window() {
+  tmux_test display-message -p -t "$1" '#{pane_id}'
 }
 
 list_session_window_names() {

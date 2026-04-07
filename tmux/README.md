@@ -24,6 +24,7 @@ This repo uses [gpakosz/.tmux](https://github.com/gpakosz/.tmux) as the base con
 - Pane border status shown at the bottom
 - Pane border text shows:
   - pane index
+  - Pi pane activity indicator when available (`[·]` waiting, `[●]` running, `[⚙]` tool, `[✓]` finished, `[✗]` errored)
   - current pane path
   - cached git branch for that pane when available
 
@@ -51,7 +52,7 @@ This repo uses [gpakosz/.tmux](https://github.com/gpakosz/.tmux) as the base con
 - Splits the sidebar into `Agents` and `Panes` sections
 - Uses stable pane registration via `@agents_sidebar_name_<pane_id>` plus per-pane metadata for `kind`, `provider`, and `status`
 - Detects coding agents heuristically (`pi`, `codex`, `claude`) and supports explicit pane classification
-- Includes a pi extension hook that marks pi panes as agents and updates their status during `agent_start`, `tool_execution_*`, and `agent_end`
+- Includes a pi extension hook that marks pi panes as agents and updates both sidebar state and pane-border indicators during `session_start`, `agent_start`, `tool_execution_*`, `agent_end`, and `session_shutdown`
 - Compact mode supports direct keyboard selection and mouse click selection in the sidebar
 - New managed panes can be created with a derived name from pane path + branch
 
@@ -99,6 +100,34 @@ mkdir -p ~/.tmux/scripts
 ln -sfn ~/workspace/configs/tmux/scripts/tmux-battery-cache.sh ~/.tmux/scripts/tmux-battery-cache.sh
 ln -sfn ~/workspace/configs/tmux/scripts/tmux-apply-fast-status.sh ~/.tmux/scripts/tmux-apply-fast-status.sh
 ```
+
+## Pi hook setup for pane activity indicators
+
+The pane-border activity indicator for Pi sessions comes from the global Pi extension:
+
+- `pi/agent/extensions/agents-sidebar-status.ts`
+
+Suggested setup:
+
+```bash
+mkdir -p ~/.pi/agent ~/.pi/agent/extensions
+ln -sfn ~/workspace/configs/pi/agent/settings.json ~/.pi/agent/settings.json
+ln -sfn ~/workspace/configs/pi/agent/extensions/minimal-footer.ts ~/.pi/agent/extensions/minimal-footer.ts
+ln -sfn ~/workspace/configs/pi/agent/extensions/agents-sidebar-status.ts ~/.pi/agent/extensions/agents-sidebar-status.ts
+```
+
+Then reload Pi in each running session with:
+
+```text
+/reload
+```
+
+Indicator meanings near the pane border:
+- `[·]` — waiting for input
+- `[●]` — currently running
+- `[⚙]` — executing a tool
+- `[✓]` — just finished successfully
+- `[✗]` — last run ended with an error
 
 ## tmux-agents-sidebar usage
 
@@ -154,7 +183,7 @@ When the sidebar is focused:
 - Compact mode keeps inactive panes in a detached tmux session named like `__agents_sidebar_store_<session-key>`.
 - `register` and `new` create agent entries; ordinary shell panes stay in `Panes` unless you mark or detect them as agents.
 - Heuristic agent detection looks at explicit metadata first, then pane title / command / child-process hints.
-- `pi/agent/extensions/agents-sidebar-status.ts` publishes pi lifecycle status into tmux so pi panes update immediately when work starts, tools run, and turns complete.
+- `pi/agent/extensions/agents-sidebar-status.ts` publishes pi lifecycle status into tmux so pane borders and sidebar rows update immediately when Pi is waiting, running, executing tools, finishing, or erroring.
 - If compact state gets stale, use:
 
 ```bash

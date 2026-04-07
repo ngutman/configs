@@ -11,7 +11,7 @@ Personal dotfiles/configs I can share publicly.
 - `tmux/scripts/` — helper scripts for tmux status/battery plus agents-sidebar wrappers
 - `ghostty/config` — Ghostty terminal configuration
 - `pi/agent/settings.json` — pi agent general settings (no auth)
-- `pi/agent/extensions/` — global pi extensions such as the minimal footer and tmux agents-sidebar status hook
+- `pi/agent/extensions/` — global pi extensions such as the minimal footer and tmux agents-sidebar status / pane-indicator hook
 - `pi/agent/pi-sub-core-settings.json` — pi-sub-core settings
 - `pi/agent/pi-sub-bar-settings.json` — pi-sub-bar display settings
 - `CHANGELOG.md` — notable shareable config changes in this repo
@@ -44,6 +44,7 @@ ln -sfn ~/workspace/configs/pi/agent/pi-sub-core-settings.json ~/.pi/agent/pi-su
 ln -sfn ~/workspace/configs/pi/agent/pi-sub-bar-settings.json ~/.pi/agent/pi-sub-bar-settings.json
 ln -sfn ~/workspace/configs/pi/agent/extensions/minimal-footer.ts ~/.pi/agent/extensions/minimal-footer.ts
 ln -sfn ~/workspace/configs/pi/agent/extensions/agents-sidebar-status.ts ~/.pi/agent/extensions/agents-sidebar-status.ts
+# then run /reload inside each active pi session
 ```
 
 ## Safety rules before publishing

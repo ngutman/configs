@@ -13,14 +13,14 @@ pane_shell="$(new_test_pane)"
 
 register_pane "$pane_agent" orch
 set_pane_title "$pane_pi" "π - sidebar-bot"
-set_pane_status "$pane_pi" tool bash
+set_pane_status "$pane_pi" error
 mark_pane "$pane_shell" shellbox
 
 snapshot="$(snapshot_output)"
 status="$(status_output)"
 
 assert_contains $'entry\torch\t'"$pane_agent"$'\t@0\tmain\tagent\tunknown\tidle' "$snapshot" "registered pane should be classified as an idle agent"
-assert_contains $'entry\tsidebar-bot\t'"$pane_pi"$'\t@0\tmain\tagent\tpi\ttool\tbash' "$snapshot" "pi heuristic should classify the pane as a pi agent with tool status"
+assert_contains $'entry\tsidebar-bot\t'"$pane_pi"$'\t@0\tmain\tagent\tpi\terror' "$snapshot" "pi heuristic should classify the pane as a pi agent with error status"
 assert_contains $'entry\tshellbox\t'"$pane_shell"$'\t@0\tmain\tpane' "$snapshot" "explicit regular pane should stay classified as a pane"
 
 assert_contains "agents:" "$status" "status should print an agents section"
