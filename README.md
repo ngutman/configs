@@ -11,8 +11,6 @@ Personal dotfiles/configs I can share publicly.
 - `ghostty/config` — Ghostty terminal configuration
 - `pi/agent/settings.json` — pi agent general settings (no auth)
 - `pi/agent/extensions/` — global pi extensions such as the minimal footer
-- `pi/agent/pi-sub-core-settings.json` — pi-sub-core settings
-- `pi/agent/pi-sub-bar-settings.json` — pi-sub-bar display settings
 - `CHANGELOG.md` — notable shareable config changes in this repo
 
 ## Local symlinks
@@ -38,8 +36,6 @@ ln -sfn ~/workspace/configs/ghostty/config ~/.config/ghostty/config
 # pi settings (no auth)
 mkdir -p ~/.pi/agent ~/.pi/agent/extensions
 ln -sfn ~/workspace/configs/pi/agent/settings.json ~/.pi/agent/settings.json
-ln -sfn ~/workspace/configs/pi/agent/pi-sub-core-settings.json ~/.pi/agent/pi-sub-core-settings.json
-ln -sfn ~/workspace/configs/pi/agent/pi-sub-bar-settings.json ~/.pi/agent/pi-sub-bar-settings.json
 ln -sfn ~/workspace/configs/pi/agent/extensions/minimal-footer.ts ~/.pi/agent/extensions/minimal-footer.ts
 # then run /reload inside each active pi session
 ```
