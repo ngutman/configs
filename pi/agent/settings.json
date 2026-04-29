@@ -1,14 +1,18 @@
 {
-  "lastChangelogVersion": "0.65.2",
+  "lastChangelogVersion": "0.70.6",
   "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.4",
+  "defaultModel": "gpt-5.5",
   "defaultThinkingLevel": "high",
   "shellCommandPrefix": ". \"$HOME/.path_config\"; if command -v nvm >/dev/null 2>&1; then nvm use --silent default >/dev/null 2>&1; fi",
   "packages": [
     "../../workspace/agent-stuff",
-    "npm:@marckrenn/pi-sub-core",
-    "npm:@marckrenn/pi-sub-bar",
     "npm:pi-web-access",
-    "npm:pi-subagents"
-  ]
+    "npm:pi-subagents",
+    "git:github.com/earendil-works/pi-review",
+    "npm:pi-powerline-footer",
+    "npm:pi-intercom",
+    "../../projects/pi-diff-review",
+    "npm:pi-mcporter"
+  ],
+  "powerline": "default"
 }
